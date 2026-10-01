@@ -1,0 +1,1 @@
+pan_id,event_id,timestamp,forecast_rainfall_mm,pre_event_salinity_g_l,pre_event_depth_cm,actual_rainfall_mm,post_event_salinity_g_l,post_event_depth_cm,operator_action,harvest_outcome

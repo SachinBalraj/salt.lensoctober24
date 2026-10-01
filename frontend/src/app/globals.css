@@ -1,0 +1,101 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, "SFMono-Regular", monospace;
+
+  /* Scientific dashboard palette: cool neutral surfaces, cyan instrument accent. */
+  --color-canvas: #f5f8fa;
+  --color-surface: #ffffff;
+  --color-inset: #f8fafc;
+
+  --color-ink: #0f172a;
+  --color-ink-soft: #334155;
+  --color-muted: #64748b;
+  --color-faint: #94a3b8;
+
+  --color-line: #e2e8f0;
+  --color-line-strong: #cbd5e1;
+
+  --color-accent: #0e7490;
+  --color-accent-hover: #155e75;
+  --color-accent-soft: #ecfeff;
+  --color-accent-line: #a5f3fc;
+
+  --color-active: #047857;
+  --color-active-soft: #ecfdf5;
+  --color-active-line: #a7f3d0;
+
+  --color-caution: #b45309;
+  --color-caution-soft: #fffbeb;
+  --color-caution-line: #fde68a;
+
+  --color-danger: #be123c;
+  --color-danger-soft: #fff1f2;
+  --color-danger-line: #fecdd3;
+
+  --color-demo: #7c2d12;
+  --color-demo-soft: #fff7ed;
+  --color-demo-line: #fdba74;
+
+  /*
+   * Provenance: the six kinds of number a SaltLens screen is allowed to show.
+   *
+   * These are a second, separate scale from the status tones above. `active`,
+   * `caution` and `danger` answer "how bad is this", and a figure wearing one of
+   * them has taken on a severity it may not have — a forecast is not severe, a
+   * simulation is never wrong-but-safe. So provenance gets its own hues, chosen to
+   * be far apart from each other so the six categories stay tellable apart at a
+   * glance, and from the status tones so a colour never means two things.
+   *
+   * Colour is the second cue, not the first. Every provenance pill also carries its
+   * category as a word and a distinct shape, so the categories remain separable
+   * where colour is unavailable or cannot be relied on.
+   */
+  --color-prov-observed: #1d4ed8;
+  --color-prov-observed-soft: #eff6ff;
+  --color-prov-observed-line: #bfdbfe;
+
+  --color-prov-forecast: #6d28d9;
+  --color-prov-forecast-soft: #f5f3ff;
+  --color-prov-forecast-line: #ddd6fe;
+
+  --color-prov-simulated: #0e7490;
+  --color-prov-simulated-soft: #ecfeff;
+  --color-prov-simulated-line: #a5f3fc;
+
+  --color-prov-ml: #a21caf;
+  --color-prov-ml-soft: #fdf4ff;
+  --color-prov-ml-line: #f5d0fe;
+
+  --color-prov-recommended: #15803d;
+  --color-prov-recommended-soft: #f0fdf4;
+  --color-prov-recommended-line: #bbf7d0;
+
+  --color-prov-decision: #475569;
+  --color-prov-decision-soft: #f8fafc;
+  --color-prov-decision-line: #cbd5e1;
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--color-canvas);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+  }
+
+  /* Measurements must align vertically in tables and stat tiles. */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+}

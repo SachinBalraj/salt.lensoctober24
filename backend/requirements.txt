@@ -1,0 +1,15 @@
+# SaltLens DSS - backend (web/API) dependencies
+fastapi>=0.115
+uvicorn[standard]>=0.32
+pydantic>=2.9
+pydantic-settings>=2.6
+python-dotenv>=1.0
+
+# MongoDB (Atlas) via motor (async)
+motor>=3.6
+pymongo>=4.10
+
+# Module 20 - server-generated PDF for field-validation exports
+fpdf2>=2.8
+
+# Testing

@@ -1,0 +1,72 @@
+# =============================================================================
+# SaltLens DSS - root .gitignore
+# Secrets must never be committed. Anything matching the rules below is
+# excluded from version control; add real credentials only to local .env files.
+# =============================================================================
+
+# --- Secrets & environment ---------------------------------------------------
+# Allow the committed examples, ignore everything else.
+.env
+.env.*
+!.env.example
+!.env.example.*
+*.pem
+*.key
+*.p12
+secrets/
+
+# --- Python / backend --------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+.coverage
+htmlcov/
+coverage.xml
+
+# --- ML artifacts (trained models are reproducible, don't commit binaries) ---
+ml/models/*
+!ml/models/.gitkeep
+*.joblib
+*.pkl
+*.pickle
+*.onnx
+
+# --- Node / frontend ---------------------------------------------------------
+node_modules/
+.next/
+out/
+dist/
+*.tsbuildinfo
+next-env.d.ts
+
+# --- Data (imports/exports are large or sensitive) ---------------------------
+data/raw/*
+!data/raw/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+data/exports/*
+!data/exports/.gitkeep
+*.csv
+*.xlsx
+*.parquet
+# Field-collection templates are header-only scaffolding, never measurement
+# data, so they stay in version control even though *.csv is ignored above.
+!data/templates/**/*.csv
+
+# --- Logs / OS / editor ------------------------------------------------------
+*.log
+logs/
+.DS_Store
+.idea/
+.vscode/
+*.swp
+Thumbs.db
