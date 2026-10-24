@@ -74,6 +74,26 @@ export default function WeatherHistory({
           <p className="tabular mt-2 text-[13px] text-ink-soft">
             {valueSummary(observation) || "No values in this record."}
           </p>
+          {observation.source === "weather_api" && observation.provider ? (
+            <p className="tabular mt-1 text-[11px] text-muted">
+              {observation.provider}
+              {observation.weather_type
+                ? ` · ${observation.weather_type === "historical" ? "historical archive" : "forecast"}`
+                : ""}
+              {observation.latitude !== null &&
+              observation.latitude !== undefined &&
+              observation.longitude !== null &&
+              observation.longitude !== undefined
+                ? ` · ${observation.latitude.toFixed(4)}, ${observation.longitude.toFixed(4)}`
+                : ""}
+              {observation.requested_at
+                ? ` · requested ${formatFullTimestamp(observation.requested_at)}`
+                : ""}
+              {observation.retrieved_at
+                ? ` · retrieved ${formatFullTimestamp(observation.retrieved_at)}`
+                : ""}
+            </p>
+          ) : null}
         </li>
       ))}
     </ul>

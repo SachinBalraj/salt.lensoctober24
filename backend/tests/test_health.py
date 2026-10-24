@@ -88,11 +88,12 @@ def test_all_module_routers_registered(client):
     response = client.get("/api/modules")
     assert response.status_code == 200
     body = response.json()
-    assert body["count"] == 20
+    assert body["count"] == 22
     assert "/api/auth" in body["prefixes"]
     assert "/api/twin" in body["prefixes"]
     assert "/api/explain" in body["prefixes"]
     assert "/api/experiments" in body["prefixes"]
+    assert "/api/experiment-registry" in body["prefixes"]
     assert "/api/field-validation" in body["prefixes"]
 
 

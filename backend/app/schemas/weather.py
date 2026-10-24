@@ -180,6 +180,12 @@ class WeatherObservationRead(BaseModel):
     source: WeatherSource
     is_forecast: bool
     created_at: datetime
+    provider: str | None = None
+    latitude: float | None = None
+    longitude: float | None = None
+    weather_type: str | None = None
+    requested_at: datetime | None = None
+    retrieved_at: datetime | None = None
 
     @classmethod
     def from_observation(
@@ -197,6 +203,12 @@ class WeatherObservationRead(BaseModel):
             source=observation.source,
             is_forecast=observation.is_forecast,
             created_at=observation.created_at,
+            provider=getattr(observation, 'provider', None),
+            latitude=getattr(observation, 'latitude', None),
+            longitude=getattr(observation, 'longitude', None),
+            weather_type=getattr(observation, 'weather_type', None),
+            requested_at=getattr(observation, 'requested_at', None),
+            retrieved_at=getattr(observation, 'retrieved_at', None),
         )
 
 

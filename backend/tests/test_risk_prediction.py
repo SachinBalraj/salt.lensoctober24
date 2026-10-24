@@ -720,7 +720,75 @@ def test_no_deployed_model_answers_nothing(client: TestClient, database: FakeDat
     body = response.json()
     assert body["refusal"] == "no_deployed_model"
     assert "deployed" in body["detail"]
+    # The model exists and was evaluated, so the missing step is the deployment
+    # and not the training. Reporting "no model" here would send the reader to
+    # Module 08 for a model that is already in the registry.
+    assert body["stage"] == "not_deployed"
+    # The sufficiency audit is about training, which is not what is blocking
+    # this request, so it is not quoted beside it.
+    assert "training_gate" not in body
     assert stored_predictions(database) == []
+
+
+def test_nothing_registered_says_so_and_quotes_the_training_gate(
+    client: TestClient,
+) -> None:
+    """The empty-registry refusal carries its stage and the real thresholds.
+
+    Three things a client needs to state the truth rather than a generic
+    absence: that nothing was ever trained, what the project's own gate
+    requires, and how far from it the project actually is. The counts come from
+    the sufficiency audit rather than from literals here, so a threshold raised
+    in :mod:`app.ml.sufficiency` cannot leave this sentence behind.
+    """
+    response = predict(client)
+    assert response.status_code == 409, response.text
+    body = response.json()
+    assert body["refusal"] == "no_deployed_model"
+    assert body["stage"] == "no_model"
+    gate = body["training_gate"]
+    assert gate["ready"] is False
+    assert gate["genuine_labelled_rows"] == 0
+    assert gate["distinct_pans_in_labels"] == 0
+    assert gate["min_total_labelled_rows"] == 80
+    assert gate["min_distinct_pans"] == 3
+
+
+def test_a_trained_but_unevaluated_model_names_evaluation_as_the_missing_step(
+    client: TestClient, database: FakeDatabase
+) -> None:
+    """A model in the registry that has never been graded is not "no model".
+
+    The model is real and fitted; only Module 09 has not run. The stage says so,
+    because the remedy is a different module and a different button from the one
+    an untrained project needs.
+    """
+    seed(database)
+    dataset = build_risk_dataset(client, TWIN_FEATURES)
+    trained = client.post("/api/ml/train", json={"dataset_id": dataset["dataset_id"]})
+    assert trained.status_code == 201, trained.text
+
+    response = predict(client)
+    assert response.status_code == 409, response.text
+    body = response.json()
+    assert body["refusal"] == "no_deployed_model"
+    assert body["stage"] == "not_evaluated"
+    assert "training_gate" not in body
+    assert stored_predictions(database) == []
+
+
+def test_the_status_follows_the_registry_it_reads(
+    client: TestClient, live: dict[str, Any]
+) -> None:
+    """``GET /api/risk/`` reports the deployed model rather than a constant.
+
+    The status used to assert ``trained: false``, which is the one claim a status
+    endpoint must never make unconditionally: with a model deployed above it
+    would be calling a model in service untrained.
+    """
+    body = client.get("/api/risk/").json()
+    assert body["trained"] is True
+    assert body["model_state"] == "deployed"
 
 
 # -- refusals that are specific to this design ---------------------------
@@ -740,6 +808,9 @@ def test_a_pan_with_no_twin_state_is_refused(
     assert response.status_code == 409, response.text
     body = response.json()
     assert body["refusal"] == "no_twin_state"
+    # Named, so the panel can say what is missing rather than repeating a refusal
+    # code at an operator.
+    assert body["missing"] == ["digital twin state"]
     assert stored_predictions(database) == []
 
 

@@ -20,6 +20,7 @@ from app.db.collections import (
     OPERATOR_DECISIONS,
     PAN_OBSERVATIONS,
     RAINFALL_EVENTS,
+    RECOMMENDATION_DELIVERIES,
     RECOMMENDATIONS,
     RESEARCH_DATASETS,
     RESEARCH_EXPERIMENTS,
@@ -44,6 +45,7 @@ from app.models import (
     PanObservation,
     RainfallEvent,
     Recommendation,
+    RecommendationDelivery,
     ResearchDataset,
     ResearchExperiment,
     RiskDefinition,
@@ -168,6 +170,7 @@ COLLECTION_MODELS: dict[str, type] = {
     MODEL_EVALUATIONS: ModelEvaluation,
     MODEL_DEPLOYMENTS: ModelDeployment,
     RAINFALL_EVENTS: RainfallEvent,
+    RECOMMENDATION_DELIVERIES: RecommendationDelivery,
 }
 
 
@@ -518,6 +521,20 @@ INDEX_PLAN: tuple[IndexSpec, ...] = (
         RAINFALL_EVENTS,
         (("pan_id", pymongo.ASCENDING), ("event_timestamp", pymongo.DESCENDING)),
     ),
+    # Append-only like the rest of the operational trail. Deliberately NOT unique
+    # on recommendation_id: one recommendation may legitimately be sent more than
+    # once, and a unique index here would refuse the second send rather than record
+    # it, which would be an audit trail that lies about how often an operator
+    # actually reached for the button.
+    IndexSpec(
+        RECOMMENDATION_DELIVERIES,
+        (("recommendation_id", pymongo.ASCENDING), ("initiated_at", pymongo.DESCENDING)),
+    ),
+    IndexSpec(
+        RECOMMENDATION_DELIVERIES,
+        (("pan_id", pymongo.ASCENDING), ("initiated_at", pymongo.DESCENDING)),
+    ),
+    IndexSpec(RECOMMENDATION_DELIVERIES, (("initiated_at", pymongo.DESCENDING),)),
 )
 
 

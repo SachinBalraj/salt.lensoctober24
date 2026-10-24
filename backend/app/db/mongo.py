@@ -242,6 +242,11 @@ class MongoDatabase:
             return "connected"
         connected, latency, error = await self._ping_locked()
         if not connected:
+            # A failed ping means the connection this process believed it had is
+            # gone. Clear the index attempt flag with it, so the next successful
+            # ping provisions the indexes again instead of treating the previous
+            # attempt as still valid and leaving ``indexes_ready`` stuck false.
+            self._indexes_attempted = False
             self._set_health(
                 "error",
                 connected=False,
@@ -287,6 +292,11 @@ class MongoDatabase:
         async with self._lock:
             connected, latency, error = await self._ping_locked()
             if not connected:
+                # See ``_connect_locked``: a lost connection invalidates the
+                # index attempt too, so a recovered ping re-provisions and clears
+                # the stale error rather than reporting a healthy cluster as
+                # connected-with-a-failure.
+                self._indexes_attempted = False
                 return self._set_health(
                     "error",
                     connected=False,

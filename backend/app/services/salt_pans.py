@@ -35,6 +35,8 @@ EDITABLE_FIELDS: tuple[str, ...] = (
     "normal_depth_cm",
     "target_harvest_salinity_g_l",
     "risk_thresholds",
+    "farmer_name",
+    "farmer_whatsapp",
 )
 
 
@@ -57,6 +59,8 @@ def _rebuild(existing: SaltPan, **overrides: Any) -> SaltPan:
         "target_harvest_salinity_g_l": existing.target_harvest_salinity_g_l,
         "risk_thresholds": existing.risk_thresholds,
         "latest_observation": existing.latest_observation,
+        "farmer_name": existing.farmer_name,
+        "farmer_whatsapp": existing.farmer_whatsapp,
         "is_active": existing.is_active,
         "created_at": existing.created_at,
         "deactivated_at": existing.deactivated_at,
@@ -131,6 +135,11 @@ class SaltPanService:
             # registered before this was settable, so nothing has to distinguish
             # the two cases.
             risk_thresholds=payload.risk_thresholds.to_model(),
+            # Same reasoning for the farmer contact: a registration that omits it
+            # stores nulls, which is the same state as a pan registered before the
+            # field existed.
+            farmer_name=payload.farmer_name,
+            farmer_whatsapp=payload.farmer_whatsapp,
         )
         return await self._repository.insert(pan)
 

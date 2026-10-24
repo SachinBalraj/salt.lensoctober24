@@ -27,10 +27,12 @@ import RiskPredictionPanel from "@/components/risk/RiskPredictionPanel";
 import { ApiError } from "@/lib/api";
 import type { SaltPan } from "@/lib/pans";
 import {
+  MODEL_DEPLOYMENT_REQUIRED_MESSAGE,
+  MODEL_EVALUATION_REQUIRED_MESSAGE,
   NO_DEPLOYED_MODEL_MESSAGE,
   type RiskPrediction,
 } from "@/lib/riskPrediction";
-import { predictRisk } from "@/lib/riskPredictionApi";
+import { predictRisk, RiskApiError } from "@/lib/riskPredictionApi";
 import { explainPrediction } from "@/lib/explanationApi";
 
 const explainMock = vi.mocked(explainPrediction);
@@ -40,13 +42,15 @@ vi.mock("@/lib/explanationApi", () => ({
   explanationUnavailableMessage: (error: ApiError) => error.message,
 }));
 
-vi.mock("@/lib/riskPredictionApi", () => ({
-  predictRisk: vi.fn(),
-  predictionUnavailableMessage: (error: ApiError) =>
-    error.code === "no_deployed_model"
-      ? NO_DEPLOYED_MODEL_MESSAGE
-      : error.message,
-}));
+vi.mock("@/lib/riskPredictionApi", async () => {
+  // Only the request itself is faked. The state classifier, the messages and
+  // the error shape are the real ones, because a test that faked those too
+  // would be asserting the mock's idea of a refusal rather than this client's.
+  const actual = await vi.importActual<typeof import("@/lib/riskPredictionApi")>(
+    "@/lib/riskPredictionApi",
+  );
+  return { ...actual, predictRisk: vi.fn() };
+});
 
 const predictMock = vi.mocked(predictRisk);
 
@@ -64,6 +68,8 @@ const PAN: SaltPan = {
   created_at: "2026-01-05T08:00:00Z",
   updated_at: "2026-01-05T08:00:00Z",
   deactivated_at: null,
+  farmer_name: null,
+  farmer_whatsapp_masked: null,
   latest_observation: null,
 };
 
@@ -322,5 +328,137 @@ describe("the explanation section", () => {
     render(<RiskPredictionPanel pan={PAN} isDemo />);
     expect(screen.getByText("No prediction in demo mode")).toBeTruthy();
     expect(screen.queryByTestId("explain-ask")).toBeNull();
+  });
+});
+
+describe("which step is missing", () => {
+  // Each of these is a model that exists. Showing the fixed "no model" sentence
+  // for any of them would send the operator to train something that is already
+  // in the registry, so the panel says which step is outstanding instead.
+
+  it("says a model was trained but never evaluated", async () => {
+    predictMock.mockRejectedValue(
+      new RiskApiError("no_deployed_model no evaluation report", {
+        status: 409,
+        code: "no_deployed_model",
+        stage: "not_evaluated",
+      }),
+    );
+    await ask();
+
+    await waitFor(() =>
+      expect(screen.getByText(MODEL_EVALUATION_REQUIRED_MESSAGE)).toBeTruthy(),
+    );
+    expect(screen.getByText(/nothing has graded it yet/i)).toBeTruthy();
+    // Pointed at the module that grades it, rather than left to guess.
+    expect(screen.getByRole("link", { name: /open evaluation/i }).getAttribute("href")).toBe(
+      "/evaluation",
+    );
+    // Not the untrained sentence, and nothing that reads as a score.
+    expect(screen.queryByText(NO_DEPLOYED_MODEL_MESSAGE)).toBeNull();
+    expect(screen.queryByText(/%/)).toBeNull();
+    expect(screen.queryByRole("button", { name: /try again/i })).toBeNull();
+  });
+
+  it("says a model was evaluated but never deployed", async () => {
+    predictMock.mockRejectedValue(
+      new RiskApiError("no_deployed_model nobody deployed it", {
+        status: 409,
+        code: "no_deployed_model",
+        stage: "not_deployed",
+      }),
+    );
+    await ask();
+
+    await waitFor(() =>
+      expect(screen.getByText(MODEL_DEPLOYMENT_REQUIRED_MESSAGE)).toBeTruthy(),
+    );
+    expect(screen.getByText(/never been put in service|nobody has put it in service/i)).toBeTruthy();
+    expect(screen.queryByText(NO_DEPLOYED_MODEL_MESSAGE)).toBeNull();
+    expect(screen.queryByRole("button", { name: /try again/i })).toBeNull();
+  });
+
+  it("names the fields a deployed model could not read", async () => {
+    // The model is deployed and did answer: the gap is in the pan's twin, not
+    // in the registry, so a lifecycle sentence would be the wrong fact.
+    predictMock.mockRejectedValue(
+      new RiskApiError("no_observed_features every input would be imputed", {
+        status: 409,
+        code: "no_observed_features",
+        missing: ["current_salinity_g_l", "water_depth_cm"],
+      }),
+    );
+    await ask();
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(
+          "Prediction unavailable — missing: current_salinity_g_l, water_depth_cm",
+        ),
+      ).toBeTruthy(),
+    );
+    expect(screen.queryByText(NO_DEPLOYED_MODEL_MESSAGE)).toBeNull();
+    expect(screen.queryByText(/%/)).toBeNull();
+  });
+
+  it("quotes the gate's own requirement when nothing has been trained", async () => {
+    // The thresholds come from the backend's sufficiency audit, so raising them
+    // there changes this sentence without touching the frontend.
+    predictMock.mockRejectedValue(
+      new RiskApiError("no_deployed_model nothing is registered", {
+        status: 409,
+        code: "no_deployed_model",
+        stage: "no_model",
+        training_gate: {
+          ready: false,
+          genuine_labelled_rows: 7,
+          distinct_pans_in_labels: 1,
+          min_total_labelled_rows: 250,
+          min_distinct_pans: 6,
+        },
+      }),
+    );
+    await ask();
+
+    await waitFor(() =>
+      expect(screen.getByText(NO_DEPLOYED_MODEL_MESSAGE)).toBeTruthy(),
+    );
+    expect(
+      screen.getByText(
+        "ML prediction unavailable because a validated model has not yet been deployed.",
+      ),
+    ).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Collect at least 250 genuine labelled outcomes across at least 6 distinct pans before training.",
+      ),
+    ).toBeTruthy();
+    expect(
+      screen.getByText(
+        "7 of 250 genuine labelled outcomes on file, across 1 of 6 distinct pans.",
+      ),
+    ).toBeTruthy();
+    // Still no figure that could be read as a risk score.
+    expect(screen.queryByText(/%/)).toBeNull();
+    expect(screen.queryByRole("button", { name: /try again/i })).toBeNull();
+  });
+
+  it("falls back to the documented requirement when the gate was not readable", async () => {
+    predictMock.mockRejectedValue(
+      new RiskApiError("no_deployed_model nothing is registered", {
+        status: 409,
+        code: "no_deployed_model",
+        stage: "no_model",
+      }),
+    );
+    await ask();
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(
+          "Collect at least 80 genuine labelled outcomes across at least 3 distinct pans before training.",
+        ),
+      ).toBeTruthy(),
+    );
   });
 });

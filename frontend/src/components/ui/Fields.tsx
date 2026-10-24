@@ -70,6 +70,7 @@ export function TextField({
   readOnly,
   name,
   autoComplete,
+  type,
 }: {
   label: string;
   value: string;
@@ -83,6 +84,12 @@ export function TextField({
   readOnly?: boolean;
   name?: string;
   autoComplete?: string;
+  /**
+   * `tel` for a phone number, so a mobile keyboard offers digits and a `+` rather
+   * than an email keyboard. It changes the keyboard and nothing else: the value is
+   * still validated by the form, never by the browser.
+   */
+  type?: "text" | "tel";
 }) {
   const generated = useId();
   const id = name ?? generated;
@@ -98,7 +105,7 @@ export function TextField({
       <input
         id={id}
         name={name}
-        type="text"
+        type={type ?? "text"}
         value={value}
         placeholder={placeholder}
         maxLength={maxLength}

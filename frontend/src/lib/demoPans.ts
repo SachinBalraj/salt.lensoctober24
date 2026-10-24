@@ -65,6 +65,8 @@ const DEMO_PANS: readonly SaltPan[] = [
     created_at: DEMO_CREATED_AT,
     updated_at: DEMO_UPDATED_AT,
     deactivated_at: null,
+    farmer_name: null,
+    farmer_whatsapp_masked: null,
     latest_observation: null,
   },
   {
@@ -81,6 +83,8 @@ const DEMO_PANS: readonly SaltPan[] = [
     created_at: DEMO_CREATED_AT,
     updated_at: DEMO_UPDATED_AT,
     deactivated_at: null,
+    farmer_name: null,
+    farmer_whatsapp_masked: null,
     latest_observation: null,
   },
   {
@@ -97,6 +101,8 @@ const DEMO_PANS: readonly SaltPan[] = [
     created_at: DEMO_CREATED_AT,
     updated_at: DEMO_UPDATED_AT,
     deactivated_at: "2026-02-11T10:30:00Z",
+    farmer_name: null,
+    farmer_whatsapp_masked: null,
     latest_observation: null,
   },
 ];

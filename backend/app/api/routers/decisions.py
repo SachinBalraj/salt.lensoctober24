@@ -49,6 +49,14 @@ from app.schemas.decisions import (
     DecisionRuleVersionsResponse,
     DecisionVariableResponse,
 )
+from app.schemas.whatsapp import (
+    WhatsAppDeliveryListResponse,
+    WhatsAppDeliveryRead,
+    WhatsAppPreviewRead,
+    WhatsAppRefusalResponse,
+    WhatsAppSendRead,
+    WhatsAppSendRequest,
+)
 from app.services.decision_reference_rule import reference_rule_draft
 from app.services.decision_rules import DecisionRuleError, DecisionRuleService
 from app.services.decisions import (
@@ -59,6 +67,7 @@ from app.services.decisions import (
     DecisionRefusal,
 )
 from app.services.mass_balance import SIMULATION_ASSUMPTIONS, SIMULATOR_DISCLAIMER
+from app.services.whatsapp_delivery import WhatsAppRefusal, WhatsAppService
 
 router = APIRouter(prefix="/api/decisions", tags=["12-decisions"])
 
@@ -80,6 +89,9 @@ ENDPOINTS = [
     "POST /api/decisions/advise",
     "GET  /api/decisions/{pan_id}/latest",
     "GET  /api/decisions/log",
+    "GET  /api/decisions/{recommendation_id}/whatsapp-preview",
+    "POST /api/decisions/{recommendation_id}/whatsapp-send",
+    "GET  /api/decisions/{recommendation_id}/whatsapp-sends",
 ]
 
 #: Stated as a list of things this module will not do, because that is the useful
@@ -406,6 +418,154 @@ async def advice_log(
     rows = await service.log(pan_id=pan_id, action=action, limit=limit, skip=skip)
     return DecisionLogResponse(
         count=len(rows), advice=[DecisionAdviceResponse.from_recommendation(row) for row in rows]
+    )
+
+
+def get_whatsapp_service() -> WhatsAppService:
+    """The WhatsApp service, overridable in tests.
+
+    Built from ``get_db()`` at request time rather than at import, so a request for
+    an unreachable database produces the same 503 every other route here produces
+    and a malformed body is still a 422.
+    """
+    return WhatsAppService(get_db())
+
+
+WhatsAppDependency = Annotated[WhatsAppService, Depends(get_whatsapp_service)]
+
+
+def _whatsapp_refusal(exc: WhatsAppRefusal) -> JSONResponse:
+    """A refusal as a 409 carrying its code.
+
+    409 for the same reason Module 12's refusals are: the request was well formed
+    and the recommendation exists, and what cannot be produced is a send from the
+    evidence on hand. A missing contact is not a 404, and a bad phone number is
+    not a 422 — both are states of the data, and a client needs to tell them apart
+    from a malformed request and from a missing record.
+    """
+    return JSONResponse(
+        status_code=status.HTTP_409_CONFLICT,
+        content=WhatsAppRefusalResponse(**exc.as_body()).model_dump(mode="json"),
+    )
+
+
+@router.get(
+    "/{recommendation_id}/whatsapp-preview",
+    response_model=WhatsAppPreviewRead,
+    summary="The WhatsApp message that would be sent, and to whom",
+)
+async def whatsapp_preview(
+    recommendation_id: str,
+    service: WhatsAppDependency,
+) -> WhatsAppPreviewRead:
+    """The exact text and masked recipient for one recommendation. Writes nothing.
+
+    Exists so the operator can read the message before a person receives it. It
+    shares one code path with the send itself, so the preview cannot show text the
+    send would then produce differently — a preview assembled separately would let
+    an operator approve a message that is not the one sent.
+
+    The recipient is masked. The unmasked number exists on the pan document, where
+    the send needs it, and is not returned by any endpoint: a response body is the
+    easiest place in this system for a number to end up in a browser history, a
+    proxy log or a screenshot.
+    """
+    try:
+        preview = await service.preview(recommendation_id)
+        recommendation = preview.recommendation
+    except WhatsAppRefusal as exc:
+        return _whatsapp_refusal(exc)  # type: ignore[return-value]
+
+    from app.models.phone import mask_phone
+
+    reference = mask_phone(preview.recipient_number)
+    if reference is None:  # pragma: no cover - preview resolved a usable number
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="The configured number could not be masked for display.",
+        )
+    return WhatsAppPreviewRead(
+        recommendation_id=recommendation.recommendation_id,
+        pan_id=recommendation.pan_id,
+        recipient_contact_reference=reference,
+        message=preview.message.text,
+        message_sha256=preview.message.sha256,
+        message_template_version=preview.message.template_version,
+        recommended_action=recommendation.action,  # type: ignore[arg-type]
+        priority=recommendation.priority.value,
+        rule_name=recommendation.rule_name,
+        rule_version=recommendation.rule_version,
+        farmer_name=preview.farmer_name,
+    )
+
+
+@router.post(
+    "/{recommendation_id}/whatsapp-send",
+    response_model=WhatsAppSendRead,
+    summary="Initiate a WhatsApp send of one stored recommendation",
+)
+async def whatsapp_send(
+    recommendation_id: str,
+    payload: WhatsAppSendRequest,
+    service: WhatsAppDependency,
+) -> WhatsAppSendRead:
+    """Record that an operator initiated a WhatsApp send, and return the link.
+
+    **Nothing is transmitted from this server.** The response carries WhatsApp's
+    ``wa.me`` click-to-chat URL; the operator's browser opens it, WhatsApp opens on
+    the operator's own device, and the operator presses send there. There is no
+    WhatsApp Business API account, token or webhook behind this, and the response
+    says ``action: SEND_INITIATED`` and ``delivery_status: not_confirmed`` because
+    those are the only two facts available — the system is not on the conversation
+    and receives no receipt.
+
+    **The body cannot influence the message.** It carries ``operator_id`` and
+    nothing else; there is no message, recipient or number field to send, because
+    any of them would be a way to record a communication the stored recommendation
+    does not support. The pan is derived from the recommendation, so the farmer
+    contacted cannot be chosen by the caller.
+
+    **Authentication.** This backend has none — no route in the application
+    resolves a user, a token or a role — so this endpoint is guarded exactly as
+    every other route is, and ``operator_id`` is a self-reported string stored as
+    such. That is a known gap, recorded rather than papered over: adding auth to
+    this one route would leave the other twenty endpoints unguarded and make the
+    application harder to reason about than it is today.
+
+    **What writing the record does not do.** It does not modify the recommendation,
+    does not create an operator decision, and does not touch ``verification_state``,
+    independent verification, a physical-action record or any field-validation
+    state. A send is a communication event and stays in its own collection.
+    """
+    try:
+        send = await service.initiate_send(
+            recommendation_id, operator_id=payload.operator_id
+        )
+    except WhatsAppRefusal as exc:
+        return _whatsapp_refusal(exc)  # type: ignore[return-value]
+    return WhatsAppSendRead.from_send(send)
+
+
+@router.get(
+    "/{recommendation_id}/whatsapp-sends",
+    response_model=WhatsAppDeliveryListResponse,
+    summary="Every WhatsApp send initiated for one recommendation",
+)
+async def whatsapp_send_history(
+    recommendation_id: str,
+    service: WhatsAppDependency,
+) -> WhatsAppDeliveryListResponse:
+    """The sends recorded for one recommendation, newest first.
+
+    More than one row is normal: an operator may re-send, and the collection is
+    append-only precisely so that repeated presses are visible as presses. Every row
+    says ``SEND_INITIATED``; none of them says anything was delivered.
+    """
+    rows = await service.list_for_recommendation(recommendation_id)
+    return WhatsAppDeliveryListResponse(
+        recommendation_id=recommendation_id,
+        found=bool(rows),
+        deliveries=[WhatsAppDeliveryRead.from_delivery(row) for row in rows],
     )
 
 

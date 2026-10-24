@@ -41,6 +41,11 @@ RESEARCH_EXPERIMENTS = "research_experiments"
 #: per reported event, with the pre/post snapshots, the actual rainfall and any
 #: interventions embedded, so the report is reproducible from the record alone.
 RAINFALL_EVENTS = "rainfall_events"
+#: Operator-initiated WhatsApp sends. Append-only, and deliberately separate from
+#: ``OPERATOR_DECISIONS``: a send may happen several times per recommendation, it
+#: records a communication rather than a disposition, and no field in it is ever
+#: allowed to assert delivery or a physical action.
+RECOMMENDATION_DELIVERIES = "recommendation_deliveries"
 
 ALL_COLLECTIONS: tuple[str, ...] = (
     USERS,
@@ -62,6 +67,7 @@ ALL_COLLECTIONS: tuple[str, ...] = (
     MODEL_DEPLOYMENTS,
     RESEARCH_EXPERIMENTS,
     RAINFALL_EVENTS,
+    RECOMMENDATION_DELIVERIES,
 )
 
 __all__ = [
@@ -78,6 +84,7 @@ __all__ = [
     "PAN_OBSERVATIONS",
     "RAINFALL_EVENTS",
     "RECOMMENDATIONS",
+    "RECOMMENDATION_DELIVERIES",
     "RESEARCH_DATASETS",
     "RESEARCH_EXPERIMENTS",
     "RISK_DEFINITIONS",

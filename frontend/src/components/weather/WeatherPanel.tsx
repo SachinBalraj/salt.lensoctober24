@@ -6,6 +6,7 @@ import WeatherChart from "@/components/weather/WeatherChart";
 import WeatherForm from "@/components/weather/WeatherForm";
 import WeatherHistory from "@/components/weather/WeatherHistory";
 import WeatherProvidersCard from "@/components/weather/WeatherProvidersCard";
+import WeatherFetchPanel from "@/components/weather/WeatherFetchPanel";
 import { Alert, Skeleton } from "@/components/ui/Feedback";
 import { Card, CardHeader } from "@/components/ui/Primitives";
 import { ApiError } from "@/lib/api";
@@ -51,13 +52,25 @@ function asApiError(caught: unknown, fallback: string): ApiError {
 export default function WeatherPanel({
   pan,
   isDemo = false,
+  onEvidenceRecorded,
 }: {
   pan: SaltPan;
   isDemo?: boolean;
+  /**
+   * Called after a weather record is stored, so the digital twin below can
+   * re-read the join against it. The twin cites this record as evidence and must
+   * not keep showing a state assembled before it existed.
+   */
+  onEvidenceRecorded?: () => void;
 }) {
   const [reloadToken, setReloadToken] = useState(0);
   const [history, setHistory] = useState<HistoryState | null>(null);
   const [providersState, setProvidersState] = useState<ProvidersState | null>(null);
+
+  const reload = () => {
+    setReloadToken((token) => token + 1);
+    onEvidenceRecorded?.();
+  };
 
   const requestKey = `${pan.pan_id}|${reloadToken}`;
   const loading = !isDemo && history?.key !== requestKey;
@@ -137,9 +150,31 @@ export default function WeatherPanel({
           panId={pan.pan_id}
           disabled={isDemo}
           providersConnected={providerCount}
-          onRecorded={() => setReloadToken((token) => token + 1)}
+          onRecorded={reload}
         />
       </Card>
+
+      {!isDemo ? (
+        <WeatherFetchPanel
+          panId={pan.pan_id}
+          panName={pan.pan_name}
+          hasCoordinates={
+            pan.latitude !== null &&
+            pan.latitude !== undefined &&
+            pan.longitude !== null &&
+            pan.longitude !== undefined
+          }
+          coordinates={
+            pan.latitude !== null &&
+            pan.latitude !== undefined &&
+            pan.longitude !== null &&
+            pan.longitude !== undefined
+              ? { latitude: pan.latitude, longitude: pan.longitude }
+              : null
+          }
+          onSaved={reload}
+        />
+      ) : null}
 
       <WeatherProvidersCard
         panId={pan.pan_id}
@@ -148,7 +183,7 @@ export default function WeatherPanel({
         error={isDemo ? null : (providersState?.error ?? null)}
         disabled={isDemo}
         isDemo={isDemo}
-        onFetched={() => setReloadToken((token) => token + 1)}
+        onFetched={reload}
       />
 
       <div className="grid gap-4 lg:grid-cols-3">

@@ -20,6 +20,11 @@ export type PanFormProps = {
   panIdLocked: boolean;
   submitLabel: string;
   idPrefix: string;
+  /**
+   * The farmer's number as already recorded, masked. Shown so an operator editing a
+   * pan knows a contact exists without the form having to hold a real number.
+   */
+  recordedFarmerNumber?: string | null;
 };
 
 export default function PanForm({
@@ -32,6 +37,7 @@ export default function PanForm({
   panIdLocked,
   submitLabel,
   idPrefix,
+  recordedFarmerNumber,
 }: PanFormProps) {
   const fieldId = (name: keyof SaltPanFormValues) => `${idPrefix}-${name}`;
 
@@ -163,6 +169,127 @@ export default function PanForm({
             step={0.1}
             placeholder="e.g. 285"
             hint="Must be greater than 0."
+          />
+        </div>
+      </fieldset>
+
+      {/* The operator's own decision limits. Every field is optional and blank means
+          "not configured" — this project supplies none of these numbers. A decision
+          rule reads them from here and is refused, not defaulted, when one is unset,
+          so this group is where a pan becomes advisable. */}
+      <fieldset className="space-y-4" disabled={submitting}>
+        <legend className="text-[11px] font-semibold uppercase tracking-[0.14em] text-faint">
+          Risk thresholds
+        </legend>
+        <p className="text-xs text-muted">
+          Your own limits for this pan, compared against by the decision rule. Every
+          field is optional and left blank means not configured — no value is assumed
+          in its place. A rule that needs a limit you have not set is refused rather
+          than advised against a number this software invented.
+        </p>
+        <div className="grid gap-4 sm:grid-cols-3">
+          <NumberField
+            name={fieldId("flood_depth_cm")}
+            label="Flood depth"
+            unit="cm"
+            value={values.flood_depth_cm}
+            onChange={(value) => onChange("flood_depth_cm", value)}
+            error={errors.flood_depth_cm}
+            min={0}
+            step={0.1}
+            required={false}
+            placeholder="e.g. 25"
+            hint="Drain the pan once the predicted depth reaches this."
+          />
+          <NumberField
+            name={fieldId("dilution_salinity_g_l")}
+            label="Dilution salinity"
+            unit="g/L"
+            value={values.dilution_salinity_g_l}
+            onChange={(value) => onChange("dilution_salinity_g_l", value)}
+            error={errors.dilution_salinity_g_l}
+            min={0}
+            step={0.1}
+            required={false}
+            placeholder="e.g. 180"
+            hint="Below this the brine is too dilute to sell."
+          />
+          <NumberField
+            name={fieldId("critical_rainfall_24h_mm")}
+            label="Critical rainfall (24 h)"
+            unit="mm"
+            value={values.critical_rainfall_24h_mm}
+            onChange={(value) => onChange("critical_rainfall_24h_mm", value)}
+            error={errors.critical_rainfall_24h_mm}
+            min={0}
+            step={1}
+            required={false}
+            placeholder="e.g. 50"
+            hint="Rainfall over 24 h above which the pan is at risk."
+          />
+          <NumberField
+            name={fieldId("target_flow_cm")}
+            label="Target transfer depth"
+            unit="cm"
+            value={values.target_flow_cm}
+            onChange={(value) => onChange("target_flow_cm", value)}
+            error={errors.target_flow_cm}
+            min={0}
+            step={0.1}
+            required={false}
+            placeholder="e.g. 12"
+            hint="The depth you keep when transferring brine."
+          />
+          <NumberField
+            name={fieldId("max_observation_age_hours")}
+            label="Maximum reading age"
+            unit="h"
+            value={values.max_observation_age_hours}
+            onChange={(value) => onChange("max_observation_age_hours", value)}
+            error={errors.max_observation_age_hours}
+            min={0}
+            step={1}
+            required={false}
+            placeholder="e.g. 24"
+            hint="Oldest reading that may still support a recommendation."
+          />
+        </div>
+      </fieldset>
+
+      {/* Farmer contact lives in its own group because it is optional and behaves
+          differently on the two forms: on registration there is nothing recorded,
+          and on edit the number is deliberately blank because the read API never
+          returns it. Typing a number adds or replaces one; leaving it blank changes
+          nothing. */}
+      <fieldset className="space-y-4" disabled={submitting}>
+        <legend className="text-[11px] font-semibold uppercase tracking-[0.14em] text-faint">
+          Farmer contact
+        </legend>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <TextField
+            name={fieldId("farmer_name")}
+            label="Farmer name"
+            value={values.farmer_name}
+            onChange={(value) => onChange("farmer_name", value)}
+            error={errors.farmer_name}
+            maxLength={120}
+            placeholder="e.g. R. Patel"
+            hint="Optional. Used only to confirm who is being messaged."
+          />
+          <TextField
+            name={fieldId("farmer_whatsapp")}
+            label="WhatsApp number"
+            value={values.farmer_whatsapp}
+            onChange={(value) => onChange("farmer_whatsapp", value)}
+            error={errors.farmer_whatsapp}
+            type="tel"
+            autoComplete="off"
+            placeholder="+919876543210"
+            hint={
+              recordedFarmerNumber
+                ? `Recorded as ${recordedFarmerNumber}. The full number is never shown again — type a number here to replace it, or leave this blank to keep it.`
+                : "Optional. Include the country code, as +919876543210. A recommendation can only be sent to a farmer whose number is recorded here."
+            }
           />
         </div>
       </fieldset>

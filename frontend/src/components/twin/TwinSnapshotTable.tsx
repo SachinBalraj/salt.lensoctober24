@@ -26,7 +26,7 @@ export default function TwinSnapshotTable({
     return (
       <EmptyState
         title="No snapshots stored"
-        description="Reading the twin does not store a snapshot. Use “Store snapshot” to record the current state, so the sequence of states can be analysed later."
+        description="Reading the twin does not store a snapshot. Use “Refresh & persist twin” to record the current state, so the sequence of states can be analysed later."
       />
     );
   }

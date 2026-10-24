@@ -726,10 +726,17 @@ def test_module_status_reports_module_four_as_implemented(weather_client):
     assert body["manual_entry"]["available"] is True
 
 
-def test_module_status_is_honest_about_the_missing_api(weather_client):
+def test_module_status_is_honest_about_the_connected_api(weather_client):
+    """Open-Meteo is registered at startup, so status must say so.
+
+    The test's job is that the status is a real reading of the deployment's
+    registry rather than a hard-coded claim either way: sensors are still
+    absent, and the weather API is reported exactly as it is wired.
+    """
     body = weather_client.get("/api/weather/status").json()
-    assert body["weather_api"]["available"] is False
-    assert body["weather_api"]["registered_providers"] == []
+    registered = body["weather_api"]["registered_providers"]
+    assert body["weather_api"]["available"] is (len(registered) > 0)
+    assert "open-meteo" in registered
     assert body["sensor_ingest"]["available"] is False
 
 
@@ -758,7 +765,8 @@ def test_the_providers_listing_works_without_a_database():
     with TestClient(app) as test_client:
         response = test_client.get("/api/weather/providers")
     assert response.status_code == 200
-    assert response.json()["count"] == 0
+    names = [item["name"] for item in response.json()["registered"]]
+    assert "open-meteo" in names
 
 
 def test_invalid_payload_is_reported_as_422_even_without_a_database():

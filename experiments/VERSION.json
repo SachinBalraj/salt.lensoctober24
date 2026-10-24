@@ -1,0 +1,62 @@
+{
+  "app_name": "SaltLens DSS API",
+  "app_version": "0.1.0",
+  "collection_counts": {
+    "decision_rules": 3,
+    "model_versions": 0,
+    "operator_decisions": 11,
+    "pan_observations": 7,
+    "rainfall_events": 1,
+    "recommendations": 39,
+    "research_datasets": 2,
+    "salt_pans": 4,
+    "simulation_runs": 42,
+    "weather_observations": 5
+  },
+  "collection_fingerprints": {
+    "decision_rules": "sha256:203a2e1053aca7e2d8157a06fe378390",
+    "model_versions": "sha256:e3b0c44298fc1c149afbf4c8996fb924",
+    "operator_decisions": "sha256:15965aa7a8692605b6a4a0013b3bdfb5",
+    "pan_observations": "sha256:62b1f771ac7422dcda0b54365d5d5312",
+    "rainfall_events": "sha256:0574d5d5fc5b21d995f73483ac6c4649",
+    "recommendations": "sha256:1dea4002ff91909b28f562e5b633edb2",
+    "research_datasets": "sha256:cf088705c1d7b8f0424cec56b78313bd",
+    "salt_pans": "sha256:04ab92e52307aa1c60ffd72f8bc0dad8",
+    "simulation_runs": "sha256:175539b00d9f20179a96a9592ede79f6",
+    "weather_observations": "sha256:6acea62c32a5e0b2bfa2e374369f5d2c"
+  },
+  "configuration": {},
+  "content_hash": "sha256:504677686a0385d0eaaf0ae21758e33a21dbdd67e254c9ed0471d8a8f948c854",
+  "experiment_timestamp": "2026-10-05T15:44:51.117954+00:00",
+  "git_commit": "731916d698c72d8f40437d56966c52d809f8c7e4",
+  "git_commit_short": "731916d698c7",
+  "git_dirty": true,
+  "manifest_version": "1.0",
+  "pan_ids": [
+    "pan_orginal"
+  ],
+  "rule_name": "Operator-configured harvest and flood rule",
+  "rule_specification_hash": "sha256:06a32ee5d7f61912af5327b3ae7725c0576cc8e1640601f7de8bb96fbd9a4d7b",
+  "rule_version": 2,
+  "schema_versions": {
+    "dataset_builder": 1,
+    "decision_rule": 1,
+    "experiment_manifest": "1.0",
+    "risk_definition": 1
+  },
+  "simulation_assumptions": [
+    "Complete mixing: the rain and the brine reach one uniform salinity instantly, so a single concentration describes the whole pan.",
+    "No evaporation during the event: rainfall is the only water that moves.",
+    "No drainage: water leaves the pan by no route while the event runs.",
+    "No overflow: the pan is assumed deep enough to hold every drop of rain, so nothing spills and no brine is lost over the wall.",
+    "No seepage: no water percolates through the pan floor.",
+    "No brine transfer: brine is neither pumped in nor drawn off during the event, so the pan keeps exactly the salt it started with.",
+    "No crystallization during the calculation: salt stays dissolved, so the salinity is a solution concentration and no salt is precipitated out.",
+    "Rainfall is a single instantaneous depth: the model does not resolve when the rain fell or how fast, only how much in total."
+  ],
+  "simulation_model_name": "rainfall-dilution-mass-balance-v1",
+  "twin_version": "0.1.0",
+  "unavailable": {},
+  "weather_data_source": "manual",
+  "weather_provider_registry": []
+}

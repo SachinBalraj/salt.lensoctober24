@@ -60,6 +60,12 @@ from app.models.recommendation import (
     DecisionTwinSummary,
     Recommendation,
 )
+from app.models.recommendation_delivery import (
+    DeliveryAction,
+    DeliveryStatus,
+    NotificationChannel,
+    RecommendationDelivery,
+)
 from app.models.risk_definition import (
     RiskClassDistribution,
     RiskClassShare,
@@ -92,6 +98,8 @@ __all__ = [
     "DecisionSimulationSummary",
     "DecisionTwinSummary",
     "DecisionVariableSource",
+    "DeliveryAction",
+    "DeliveryStatus",
     "DigitalTwinState",
     "Explanation",
     "FeatureAttribution",
@@ -110,6 +118,7 @@ __all__ = [
     "ModelEvaluation",
     "ModelStatus",
     "ModelVersion",
+    "NotificationChannel",
     "OperatorDecision",
     "OperatorDecisionType",
     "OperatorFeedback",
@@ -117,6 +126,7 @@ __all__ = [
     "PyObjectId",
     "RainfallEvent",
     "Recommendation",
+    "RecommendationDelivery",
     "RecommendationPriority",
     "ResearchDataSource",
     "ResearchDataset",

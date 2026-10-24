@@ -60,7 +60,7 @@ from app.services.datasets import DatasetService
 from app.services.deployment import DeploymentService
 from app.services.digital_twin import DigitalTwinService
 from app.services.explain import ExplanationUnavailable, ShapExplanationService
-from app.services.ml import ARTIFACT_DIRECTORY
+from app.services.ml import ARTIFACT_DIRECTORY, training_gate_summary
 from app.services.twin_features import TwinFeatureAssembly, TwinFeatureRow
 
 #: Refusal codes. Distinct from the deployment module's codes because these are
@@ -74,6 +74,24 @@ NO_OBSERVED_FEATURES = "no_observed_features"
 FEATURE_MISMATCH = "feature_mismatch"
 ARTIFACT_UNAVAILABLE = "artifact_unavailable"
 FUTURE_ONLY_FEATURE = "feature_not_knowable_at_prediction_time"
+
+#: Why nothing is deployed for a target, reported beside the refusal.
+#:
+#: "no deployed model" is three different states with three different next
+#: steps, and a single sentence forces the client to guess which one it is
+#: looking at: a project that has never trained anything, a project whose model
+#: is waiting for an evaluation, and a project whose evaluated model is waiting
+#: for somebody to deploy it. The stage says which, so the interface can state
+#: the requirement that actually unblocks it rather than a generic absence.
+STAGE_NO_MODEL = "no_model"
+STAGE_NOT_EVALUATED = "not_evaluated"
+STAGE_NOT_DEPLOYED = "not_deployed"
+
+#: The input a prediction is assembled from, named for the operator when it is
+#: absent. Not a feature name, because it is not one: the twin is where every
+#: feature comes from, and with no twin there is nothing to read a single one of
+#: them from.
+TWIN_STATE_INPUT = "digital twin state"
 
 #: Whether Module 11 could attribute this prediction. Reported beside the answer
 #: rather than inside it, because an explanation is additional to the model's output
@@ -92,16 +110,37 @@ class PredictionRefusal(RuntimeError):
     be acted on, so the request is refused and the reason is specific enough to act on.
     """
 
-    def __init__(self, detail: str, *, code: str, model_id: str | None = None) -> None:
+    def __init__(
+        self,
+        detail: str,
+        *,
+        code: str,
+        model_id: str | None = None,
+        stage: str | None = None,
+        missing: list[str] | None = None,
+        training_gate: dict[str, Any] | None = None,
+    ) -> None:
         super().__init__(detail)
         self.detail = detail
         self.code = code
         self.model_id = model_id
+        #: Which step is outstanding, for a ``no_deployed_model`` refusal.
+        self.stage = stage
+        #: The named inputs that could not be read, for a refusal about inputs.
+        self.missing = missing
+        #: The sufficiency gate's own counts, when training is the blocker.
+        self.training_gate = training_gate
 
     def as_body(self) -> dict[str, Any]:
         body: dict[str, Any] = {"detail": self.detail, "refusal": self.code}
         if self.model_id is not None:
             body["model_id"] = self.model_id
+        if self.stage is not None:
+            body["stage"] = self.stage
+        if self.missing:
+            body["missing"] = list(self.missing)
+        if self.training_gate is not None:
+            body["training_gate"] = self.training_gate
         return body
 
 
@@ -179,6 +218,7 @@ class OperationalPredictionService:
         resolved_target = target or ResearchTarget.OPERATIONAL_RISK
         model = await self._deployments.deployed_version(resolved_target)
         if model is None:
+            stage = await self._absence_stage(resolved_target)
             raise PredictionRefusal(
                 detail=(
                     f"{NO_DEPLOYED_MODEL} No model version is deployed for target "
@@ -190,6 +230,16 @@ class OperationalPredictionService:
                     "for it. No rule-based or heuristic score is offered in its place."
                 ),
                 code=NO_DEPLOYED_MODEL,
+                stage=stage,
+                # The gate only speaks when training is what is missing. A model
+                # that exists and was never deployed is not blocked by data, and
+                # quoting a sufficiency audit beside it would point the reader at
+                # the wrong remedy.
+                training_gate=(
+                    await training_gate_summary(self._database)
+                    if stage == STAGE_NO_MODEL
+                    else None
+                ),
             )
 
         risk = await self._rule_of(model)
@@ -286,6 +336,36 @@ class OperationalPredictionService:
             "input_source": "current_digital_twin_state",
             **explainability,
         }
+
+    async def _absence_stage(self, target: ResearchTarget) -> str:
+        """Which step is outstanding, when nothing is deployed for this target.
+
+        Read from the same registry the gate itself reads, so the stage cannot
+        disagree with the refusal: the versions are filtered by exactly the
+        target that just failed to resolve, and a report is looked up per
+        version the same way Module 09 stores it.
+
+        The three states are ordered by how far the project got, not by
+        severity. Nothing registered means training has not happened; registered
+        without a report means evaluation has not happened; a report with no
+        deployment means somebody has to decide to field it. A registry that
+        cannot be listed raises rather than reporting "no model", because
+        "nobody trained one" and "I could not read the registry" are different
+        facts and only one of them is about the project.
+
+        The evaluation is read per version rather than from ``list_versions``'
+        report map, which is keyed by model id and so keeps only one version's
+        report: a model whose v1 was evaluated and whose v2 was not has still
+        been evaluated, and calling it unevaluated would send the reader to
+        Module 09 for a report that already exists.
+        """
+        versions, _ = await self._deployments.list_versions(target=target)
+        if not versions:
+            return STAGE_NO_MODEL
+        for version in versions:
+            if await self._deployments.evaluation_for(version) is not None:
+                return STAGE_NOT_DEPLOYED
+        return STAGE_NOT_EVALUATED
 
     async def _explain(self, stored: MLPrediction) -> tuple[dict[str, Any] | None, dict[str, Any]]:
         """Attribute the stored prediction, and report whether that was possible.
@@ -426,6 +506,7 @@ class OperationalPredictionService:
                     ),
                     code=NO_TWIN_STATE,
                     model_id=model.model_id,
+                    missing=[TWIN_STATE_INPUT],
                 ) from exc
             if twin is not None:
                 return twin
@@ -440,6 +521,7 @@ class OperationalPredictionService:
                 ),
                 code=NO_TWIN_STATE,
                 model_id=model.model_id,
+                missing=[TWIN_STATE_INPUT],
             )
 
         try:
@@ -452,6 +534,7 @@ class OperationalPredictionService:
                 ),
                 code=NO_TWIN_STATE,
                 model_id=model.model_id,
+                missing=[TWIN_STATE_INPUT],
             ) from exc
         eligible = [state for state in snapshots if state.as_of <= as_of]
         if not eligible:
@@ -465,6 +548,7 @@ class OperationalPredictionService:
                 ),
                 code=NO_TWIN_STATE,
                 model_id=model.model_id,
+                missing=[TWIN_STATE_INPUT],
             )
         return max(eligible, key=lambda state: state.as_of)
 
@@ -541,6 +625,10 @@ class OperationalPredictionService:
                 ),
                 code=NO_OBSERVED_FEATURES,
                 model_id=model.model_id,
+                # The whole list, not the four the sentence quotes: a reader
+                # fixing this needs every column that arrived empty, and the
+                # detail only had room for the first few.
+                missing=sorted(row.absent),
             )
         return row
 
@@ -756,6 +844,10 @@ __all__ = [
     "NO_OBSERVED_FEATURES",
     "NO_TWIN_STATE",
     "RULE_UNAVAILABLE",
+    "STAGE_NO_MODEL",
+    "STAGE_NOT_DEPLOYED",
+    "STAGE_NOT_EVALUATED",
+    "TWIN_STATE_INPUT",
     "OperationalPredictionService",
     "PredictionRefusal",
 ]

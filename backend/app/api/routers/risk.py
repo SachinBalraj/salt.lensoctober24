@@ -39,9 +39,10 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi.responses import JSONResponse
 
-from app.api.deps import get_db
+from app.api.deps import OptionalDbDependency, get_db
 from app.api.routers.datasets import get_dataset_service
 from app.db.errors import DocumentNotFoundError
+from app.models.enums import ResearchTarget
 from app.models.risk_definition import RiskDefinitionDraft
 from app.schemas.risk import (
     RiskCatalogResponse,
@@ -57,7 +58,12 @@ from app.schemas.risk import (
 )
 from app.services.dataset_catalog import TARGET_CATALOG
 from app.services.datasets import DatasetService
+from app.services.deployment import DeploymentService
+from app.services.ml import training_gate_summary
 from app.services.prediction import (
+    STAGE_NO_MODEL,
+    STAGE_NOT_DEPLOYED,
+    STAGE_NOT_EVALUATED,
     OperationalPredictionService,
     PredictionRefusal,
 )
@@ -116,19 +122,67 @@ PredictionServiceDependency = Annotated[
 ]
 
 
+async def _model_state(database: Any | None) -> tuple[bool | None, str]:
+    """Whether a model exists for this module's target, and where it got to.
+
+    Read from the same registry the prediction gate reads, so the status cannot
+    claim an absence the gate would disagree with. The three "not in service"
+    states are reported separately because they have three different remedies:
+    train, evaluate, deploy.
+
+    ``trained`` is ``None`` with ``model_state`` of ``unknown`` when the registry
+    cannot be read. That distinction is the whole reason this is not a constant:
+    reporting ``false`` for an unreachable database would put a claim about the
+    project on screen that nobody made, and the client already treats a
+    non-boolean ``trained`` as "this read did not answer".
+    """
+    if database is None:
+        return None, "unknown"
+    try:
+        deployments = DeploymentService(database)
+        versions, _ = await deployments.list_versions(
+            target=ResearchTarget.OPERATIONAL_RISK
+        )
+        deployed = await deployments.deployed_version(ResearchTarget.OPERATIONAL_RISK)
+        if deployed is not None:
+            return True, "deployed"
+        if not versions:
+            return False, STAGE_NO_MODEL
+        for version in versions:
+            if await deployments.evaluation_for(version) is not None:
+                return False, STAGE_NOT_DEPLOYED
+        return False, STAGE_NOT_EVALUATED
+    except Exception:  # noqa: BLE001 -- an unreadable registry is not an absence
+        return None, "unknown"
+
+
 @router.get("/", summary="Module 10 implementation status")
-def module_status() -> dict[str, Any]:
+async def module_status(database: OptionalDbDependency) -> dict[str, Any]:
     """What this module does, and what it deliberately does not do.
 
     States the absent prediction endpoint in the body rather than leaving a
     researcher to discover it as a 404 and wonder whether they called it wrongly.
+
+    ``trained`` and ``model_state`` are read from the deployment registry rather
+    than written as a constant. They used to be a literal ``false``, which made
+    the status say "not trained" in every state including the one where a model
+    was trained, evaluated and deployed — a status endpoint that cannot be wrong
+    is only useful while nothing can change, and this one can. The gate itself
+    is unchanged: reading whether something is deployed is not predicting.
     """
+    trained, model_state = await _model_state(database)
     return {
         "module": "risk",
         "number": 10,
         "implemented": True,
         "description": DESCRIPTION,
-        "trained": False,
+        "trained": trained,
+        "model_state": model_state,
+        # The sufficiency gate behind "no model has ever been trained here",
+        # with real counts, so a client can state what is actually required
+        # instead of a fixed threshold that would drift from the code that
+        # enforces it.
+        "training_gate": await training_gate_summary(database),
         "capabilities": {
             "risk_definitions": "implemented",
             "class_distribution": "implemented",

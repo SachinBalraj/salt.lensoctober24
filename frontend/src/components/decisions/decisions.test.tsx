@@ -34,6 +34,7 @@ import {
 } from "@/lib/decisions";
 import { ADVICE_REFUSAL_MESSAGES } from "@/lib/decisionsRefusals";
 import { advise } from "@/lib/decisionsApi";
+import { farmerWhatsAppLink } from "@/lib/whatsappApi";
 
 vi.mock("@/lib/decisionsApi", async () => {
   const actual =
@@ -43,7 +44,16 @@ vi.mock("@/lib/decisionsApi", async () => {
   return { ...actual, advise: vi.fn() };
 });
 
+vi.mock("@/lib/whatsappApi", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/lib/whatsappApi")>(
+      "@/lib/whatsappApi",
+    );
+  return { ...actual, farmerWhatsAppLink: vi.fn() };
+});
+
 const adviseMock = vi.mocked(advise);
+const farmerLinkMock = vi.mocked(farmerWhatsAppLink);
 
 const PAN: SaltPan = {
   id: "pan-1",
@@ -59,7 +69,15 @@ const PAN: SaltPan = {
   created_at: "2026-01-05T08:00:00Z",
   updated_at: "2026-01-05T08:00:00Z",
   deactivated_at: null,
+  farmer_name: null,
+  farmer_whatsapp_masked: null,
   latest_observation: null,
+};
+
+/** The same pan, but with a farmer contact recorded, so sharing is possible. */
+const PAN_WITH_NUMBER: SaltPan = {
+  ...PAN,
+  farmer_whatsapp_masked: "+919•••••••10",
 };
 
 const NO_ESTIMATE_NOTICE =
@@ -201,6 +219,7 @@ async function ask() {
 
 beforeEach(() => {
   adviseMock.mockReset();
+  farmerLinkMock.mockReset();
 });
 
 describe("asking for advice", () => {
@@ -214,6 +233,16 @@ describe("asking for advice", () => {
     adviseMock.mockResolvedValue(advice());
     await ask();
     expect(adviseMock).toHaveBeenCalledWith({ panId: "kzn-2026-b01" });
+  });
+
+  it("includes the selected what-if rainfall when provided", async () => {
+    adviseMock.mockResolvedValue(advice());
+    render(<DecisionPanel pan={PAN} rainfallMm={20} />);
+    await userEvent.click(screen.getByTestId("decision-advise"));
+    expect(adviseMock).toHaveBeenCalledWith({
+      panId: "kzn-2026-b01",
+      rainfallMm: 20,
+    });
   });
 
   it("keeps a pan's advice off another pan", async () => {
@@ -643,5 +672,153 @@ describe("the thresholds behind a recommendation", () => {
     adviseMock.mockResolvedValue(advice({ criteria: [] }));
     await ask();
     expect(screen.queryByTestId("decision-criteria")).not.toBeInTheDocument();
+  });
+});
+
+describe("sharing the recommendation with the farmer", () => {
+  function link(overrides: Partial<ReturnType<typeof farmerLinkResult>> = {}) {
+    return { ...farmerLinkResult(), ...overrides };
+  }
+
+  function farmerLinkResult() {
+    return {
+      pan_id: "kzn-2026-b01",
+      recipient_contact_reference: "+919•••••••10",
+      // The server percent-encodes the message. A realistic link carries encoded
+      // spaces, newlines, ampersands and plus signs, so the client is exercised
+      // against a URL it must pass through untouched.
+      click_to_chat_url:
+        "https://wa.me/919876543210?text=SaltLens%20DSS%0ARecommendation%3A%20TRANSFER%20BRINE%20%26%20recheck%20%2B%20depth",
+      message_character_count: 42,
+    };
+  }
+
+  it("offers the button only after a recommendation is on screen", async () => {
+    adviseMock.mockResolvedValue(advice());
+    render(<DecisionPanel pan={PAN_WITH_NUMBER} />);
+
+    expect(screen.queryByTestId("decision-whatsapp-open")).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId("decision-advise"));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("decision-whatsapp-open")).toBeInTheDocument(),
+    );
+  });
+
+  it("builds the message from the advice and the pan, and opens WhatsApp", async () => {
+    const openSpy = vi.spyOn(window, "open").mockReturnValue(null);
+    adviseMock.mockResolvedValue(advice());
+    farmerLinkMock.mockResolvedValue(link());
+
+    render(<DecisionPanel pan={PAN_WITH_NUMBER} />);
+    await userEvent.click(screen.getByTestId("decision-advise"));
+    await waitFor(() => screen.getByTestId("decision-whatsapp-open"));
+    await userEvent.click(screen.getByTestId("decision-whatsapp-open"));
+
+    await waitFor(() => expect(farmerLinkMock).toHaveBeenCalledTimes(1));
+    const [panId, message] = farmerLinkMock.mock.calls[0];
+
+    expect(panId).toBe("kzn-2026-b01");
+    expect(message).toContain("Pan: Northern Evaporation Pan");
+    expect(message).toContain("Recommendation: TRANSFER BRINE");
+    expect(message).toContain("Current salinity: 300.4 g/L");
+    expect(message).toContain("Water depth: 12 cm");
+    expect(message).toContain("Rainfall scenario: 0 mm (twin.forecast_rainfall_mm)");
+    expect(message).toContain("Simulated salinity after rain: 300.4 g/L");
+    expect(message).toContain("Target harvest salinity: 285 g/L");
+    expect(message).toContain("Decision rule: wet-season harvest ladder v1");
+    expect(message).toContain("Decision basis: Physics and the written rule only");
+    expect(message).toContain(
+      "No ML prediction or model estimate was used for this recommendation.",
+    );
+
+    expect(openSpy).toHaveBeenCalledWith(
+      "https://wa.me/919876543210?text=SaltLens%20DSS%0ARecommendation%3A%20TRANSFER%20BRINE%20%26%20recheck%20%2B%20depth",
+      "_blank",
+      "noopener,noreferrer",
+    );
+  });
+
+  it("opens the encoded URL exactly as the server returned it", async () => {
+    // The client must not re-encode, decode or truncate the link: WhatsApp needs
+    // the message percent-encoded, and a second encoding would change the text.
+    const openSpy = vi.spyOn(window, "open").mockReturnValue(null);
+    const encoded =
+      "https://wa.me/919876543210?text=Line%20one%0ALine%20two%20%26%20more%20%2B%20sign";
+    adviseMock.mockResolvedValue(advice());
+    farmerLinkMock.mockResolvedValue(link({ click_to_chat_url: encoded }));
+
+    render(<DecisionPanel pan={PAN_WITH_NUMBER} />);
+    await userEvent.click(screen.getByTestId("decision-advise"));
+    await waitFor(() => screen.getByTestId("decision-whatsapp-open"));
+    await userEvent.click(screen.getByTestId("decision-whatsapp-open"));
+
+    await waitFor(() => expect(openSpy).toHaveBeenCalledWith(
+      encoded,
+      "_blank",
+      "noopener,noreferrer",
+    ));
+  });
+
+  it("does not open WhatsApp until the button is pressed", async () => {
+    const openSpy = vi.spyOn(window, "open").mockReturnValue(null);
+    adviseMock.mockResolvedValue(advice());
+
+    render(<DecisionPanel pan={PAN_WITH_NUMBER} />);
+    await userEvent.click(screen.getByTestId("decision-advise"));
+    await waitFor(() => screen.getByTestId("decision-whatsapp-open"));
+
+    expect(farmerLinkMock).not.toHaveBeenCalled();
+    expect(openSpy).not.toHaveBeenCalled();
+  });
+
+  it("disables the button and explains when no number is stored", async () => {
+    adviseMock.mockResolvedValue(advice());
+
+    render(<DecisionPanel pan={PAN} />);
+    await userEvent.click(screen.getByTestId("decision-advise"));
+    await waitFor(() => screen.getByTestId("decision-whatsapp-open"));
+
+    expect(screen.getByTestId("decision-whatsapp-open")).toBeDisabled();
+    expect(
+      screen.getByTestId("decision-whatsapp-missing-number"),
+    ).toHaveTextContent("Add the farmer's number on the pan");
+  });
+
+  it("shows the masked recipient when a number is stored", async () => {
+    adviseMock.mockResolvedValue(advice());
+
+    render(<DecisionPanel pan={PAN_WITH_NUMBER} />);
+    await userEvent.click(screen.getByTestId("decision-advise"));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("decision-whatsapp-recipient")).toHaveTextContent(
+        "+919•••••••10",
+      ),
+    );
+    expect(
+      screen.queryByTestId("decision-whatsapp-missing-number"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("reports a contact refusal without offering a retry", async () => {
+    adviseMock.mockResolvedValue(advice());
+    farmerLinkMock.mockRejectedValue(
+      new ApiError("server prose", {
+        status: 409,
+        code: "farmer_contact_not_configured",
+      }),
+    );
+
+    render(<DecisionPanel pan={PAN_WITH_NUMBER} />);
+    await userEvent.click(screen.getByTestId("decision-advise"));
+    await waitFor(() => screen.getByTestId("decision-whatsapp-open"));
+    await userEvent.click(screen.getByTestId("decision-whatsapp-open"));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("decision-whatsapp-error")).toBeInTheDocument(),
+    );
+    expect(screen.getByTestId("decision-whatsapp-open-pan")).toBeInTheDocument();
   });
 });

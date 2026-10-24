@@ -138,6 +138,38 @@ describe("registerPan", () => {
     expect(bodyOf(init).pan_id).toBe("pans-2026-a01");
   });
 
+  it("puts the operator's risk thresholds in the request body", async () => {
+    // The decision rule reads these bounds from the pan, so the block has to reach
+    // the backend or a complete pan is still unadviseable.
+    const mock = stubFetch(() => jsonResponse({ pan_id: "pans-2026-a01" }, 201));
+
+    await registerPan({
+      pan_id: "pans-2026-a01",
+      pan_name: "Northern pan",
+      location: "Port Shepstone",
+      latitude: null,
+      longitude: null,
+      area_m2: 12500,
+      normal_depth_cm: 15.5,
+      target_harvest_salinity_g_l: 285,
+      risk_thresholds: {
+        flood_depth_cm: 25,
+        dilution_salinity_g_l: 180,
+        critical_rainfall_24h_mm: 50,
+        target_flow_cm: 12,
+        max_observation_age_hours: 24,
+      },
+    });
+
+    expect(bodyOf(callOf(mock).init).risk_thresholds).toEqual({
+      flood_depth_cm: 25,
+      dilution_salinity_g_l: 180,
+      critical_rainfall_24h_mm: 50,
+      target_flow_cm: 12,
+      max_observation_age_hours: 24,
+    });
+  });
+
   it("surfaces a duplicate identifier as a 409", async () => {
     stubFetch(() =>
       jsonResponse(

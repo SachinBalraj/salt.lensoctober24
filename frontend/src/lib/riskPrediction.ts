@@ -45,6 +45,146 @@ export const NO_DEPLOYED_MODEL_MESSAGE =
 /** The backend's refusal code for that state. */
 export const NO_DEPLOYED_MODEL_REFUSAL = "no_deployed_model";
 
+/**
+ * What the operator is told, once per state, when the model did not answer.
+ *
+ * Each sentence names one state and one remedy. They are fixed here rather than
+ * composed at the point of display because a state that is worded differently
+ * on two screens is a state an operator cannot compare: "no model exists" and
+ * "nobody has deployed it" are different facts about the project, and a client
+ * that flattened them into one generic absence would be hiding the difference
+ * that decides whether the next step belongs to Module 08, Module 09 or Module
+ * 17.
+ *
+ * None of them is phrased as a failure. A project that has not trained a model
+ * yet is behaving normally, and telling an operator that something failed
+ * invites them to retry a button whose answer cannot change.
+ */
+export const MODEL_EVALUATION_REQUIRED_MESSAGE = "Model evaluation required";
+
+export const MODEL_DEPLOYMENT_REQUIRED_MESSAGE = "Model deployment required";
+
+/** Prefixed to the field names a deployed model could not read. */
+export const MISSING_INPUTS_MESSAGE_PREFIX = "Prediction unavailable — missing: ";
+
+/**
+ * Why no risk figure exists, stated before the requirement to fix it.
+ *
+ * Separate from {@link NO_DEPLOYED_MODEL_MESSAGE}, which says what the operator
+ * is not getting. This says why, in the deployment rule itself, so the two
+ * together leave nothing for an operator to infer.
+ */
+export const GATED_BY_DEPLOYMENT_MESSAGE =
+  "ML prediction unavailable because a validated model has not yet been deployed.";
+
+/**
+ * What is required before the gate opens, when the backend could not be asked.
+ *
+ * Only a fallback: the real sentence is built from
+ * {@link trainingRequirement} with the thresholds the sufficiency gate actually
+ * enforces, so a threshold raised in the backend cannot leave this text behind.
+ * The values below match the backend's `MIN_TOTAL_LABELLED_ROWS` and
+ * `MIN_DISTINCT_PANS` as of this writing, and the backend test that quotes them
+ * is what would notice a divergence.
+ */
+export const DEFAULT_TRAINING_REQUIREMENT =
+  "Collect at least 80 genuine labelled outcomes across at least 3 distinct pans before training.";
+
+/**
+ * Which of the six states a refused prediction is in.
+ *
+ * `no_model`, `not_evaluated` and `not_deployed` come from the backend's own
+ * `stage` field — this client does not infer them from prose. `missing_inputs`
+ * is a deployed model whose inputs the twin could not supply, `failed` is
+ * anything this client does not yet model (an unrecognised refusal, or a
+ * transport failure), and the success state has no refusal at all so it is not
+ * part of this union.
+ */
+export type RiskUnavailableState =
+  | "no_model"
+  | "not_evaluated"
+  | "not_deployed"
+  | "missing_inputs"
+  | "failed";
+
+/**
+ * The sufficiency gate's own counts, as carried by a refusal or the status read.
+ *
+ * Mirrors the backend's projection of `MLService.dataset_readiness`. The
+ * thresholds are nullable because a client that cannot read them must fall back
+ * to {@link DEFAULT_TRAINING_REQUIREMENT} rather than assume a number it made up.
+ */
+export type TrainingGate = {
+  ready: boolean;
+  genuine_labelled_rows: number;
+  distinct_pans_in_labels: number;
+  min_total_labelled_rows: number | null;
+  min_distinct_pans: number | null;
+};
+
+/**
+ * The requirement, with the thresholds the gate enforces.
+ *
+ * Built from the gate rather than quoted from a constant so that the sentence
+ * an operator reads and the rule the backend applies are the same two numbers.
+ */
+export function trainingRequirement(gate: TrainingGate | null): string {
+  const rows = gate?.min_total_labelled_rows;
+  const pans = gate?.min_distinct_pans;
+  if (rows === null || rows === undefined || pans === null || pans === undefined) {
+    return DEFAULT_TRAINING_REQUIREMENT;
+  }
+  return `Collect at least ${rows} genuine labelled outcomes across at least ${pans} distinct pans before training.`;
+}
+
+/**
+ * How far from the requirement the project actually is.
+ *
+ * The counts, not a percentage: a gate is met or it is not, and "0 of 80" tells
+ * an operator what to go and do in a way that "0%" does not. Returns `null`
+ * when there is nothing to report — the gate already says it is met, or it
+ * could not be read.
+ */
+export function trainingProgress(gate: TrainingGate | null): string | null {
+  if (!gate || gate.ready) return null;
+  return `${gate.genuine_labelled_rows} of ${
+    gate.min_total_labelled_rows ?? "?"
+  } genuine labelled outcomes on file, across ${
+    gate.distinct_pans_in_labels
+  } of ${gate.min_distinct_pans ?? "?"} distinct pans.`;
+}
+
+/**
+ * The sentence for one state, with the server's own prose as the fallback.
+ *
+ * `fallback` is used only for `failed`, which is the state this client does not
+ * model: flattening an unrecognised refusal into a sentence that means a
+ * different state would hide a fact about the system rather than report it.
+ * `missing` is the field list for `missing_inputs`, and when the backend
+ * supplied none the server's explanation is used rather than a sentence with an
+ * empty list after it.
+ */
+export function unavailableMessage(
+  state: RiskUnavailableState,
+  fallback: string,
+  missing: string[] = [],
+): string {
+  switch (state) {
+    case "no_model":
+      return NO_DEPLOYED_MODEL_MESSAGE;
+    case "not_evaluated":
+      return MODEL_EVALUATION_REQUIRED_MESSAGE;
+    case "not_deployed":
+      return MODEL_DEPLOYMENT_REQUIRED_MESSAGE;
+    case "missing_inputs":
+      return missing.length > 0
+        ? `${MISSING_INPUTS_MESSAGE_PREFIX}${missing.join(", ")}`
+        : fallback;
+    default:
+      return fallback;
+  }
+}
+
 /** Mirrors the backend's ResearchTarget for this endpoint. */
 export type RiskTarget = "operational_risk";
 

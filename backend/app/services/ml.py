@@ -549,6 +549,35 @@ async def _all_outcomes_for_pans(database: Any, pan_ids: list[str]) -> list[Any]
         page += 1
 
 
+async def training_gate_summary(database: Any) -> dict[str, Any] | None:
+    """The sufficiency gate's counts, as the small block a refusal can carry.
+
+    Projected from :meth:`MLService.dataset_readiness` rather than recomputed, so
+    the figure a ``no_deployed_model`` refusal quotes and the figure
+    ``GET /api/ml/readiness`` returns are the same counts read by the same code.
+    Two implementations of the gate would eventually disagree, and a reader who
+    trusted the refusal over the audit (or the other way round) would be arguing
+    with the project about its own rules.
+
+    ``None`` rather than a zero when the audit cannot be read. A zero is a claim
+    that nothing is on file; an unreachable database has not said that.
+    """
+    if database is None:
+        return None
+    try:
+        readiness = await MLService(database).dataset_readiness()
+    except Exception:  # noqa: BLE001 -- an unreadable audit is not a refusal
+        return None
+    thresholds = readiness.get("thresholds") or {}
+    return {
+        "ready": readiness.get("verdict") == "ready",
+        "genuine_labelled_rows": readiness.get("genuine_labelled_rows", 0),
+        "distinct_pans_in_labels": readiness.get("distinct_pans_in_labels", 0),
+        "min_total_labelled_rows": thresholds.get("min_total_labelled_rows"),
+        "min_distinct_pans": thresholds.get("min_distinct_pans"),
+    }
+
+
 def _unlabelled_risk_report(dataset: ResearchDataset, built: BuiltDataset) -> SufficiencyReport:
     """The refusal returned when a risk dataset's rows carry no labels.
 
@@ -583,4 +612,5 @@ __all__ = [
     "MLService",
     "TrainRequest",
     "UnsupportedTargetError",
+    "training_gate_summary",
 ]

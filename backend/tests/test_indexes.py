@@ -24,6 +24,7 @@ EXPECTED_COLLECTIONS = {
     "risk_definitions",
     "research_experiments",
     "rainfall_events",
+    "recommendation_deliveries",
 }
 
 

@@ -6,6 +6,7 @@ import { Button, Spinner } from "@/components/ui/Controls";
 import { Alert, Skeleton } from "@/components/ui/Feedback";
 import { Badge, Card, CardHeader, DataPoint, Eyebrow } from "@/components/ui/Primitives";
 import { ApiError } from "@/lib/api";
+import { isDemonstrationSource } from "@/lib/demonstration";
 import type { SaltPan } from "@/lib/pans";
 import {
   SIMULATOR_DISCLAIMER,
@@ -143,9 +144,11 @@ function NumberField({
 export default function SimulatorPanel({
   pan,
   isDemo = false,
+  onSelectedRainfallChange,
 }: {
   pan: SaltPan;
   isDemo?: boolean;
+  onSelectedRainfallChange?: (rainfallMm: number) => void;
 }) {
   const [edits, setEdits] = useState<Partial<SimulationFormValues>>({});
   const [errors, setErrors] = useState<SimulationFormErrors>({});
@@ -156,7 +159,27 @@ export default function SimulatorPanel({
   const [requestKey, setRequestKey] = useState<string | null>(null);
   const [state, setState] = useState<SweepState | null>(null);
 
-  const salinitySource = pan.latest_observation?.salinity_g_l ?? null;
+  const handleSelect = useCallback(
+    (rainfallMm: number) => {
+      setSelected(rainfallMm);
+      if (onSelectedRainfallChange) {
+        onSelectedRainfallChange(rainfallMm);
+      }
+    },
+    [onSelectedRainfallChange],
+  );
+
+  // The newest recorded reading, but only the part that is a measurement.
+  // A demonstration breeds a number the operator typed to show the workflow; it
+  // is not evidence about this pan, and seeding the balance from it would pass
+  // invented brine off as measured brine. The twin cites such values for what
+  // they are, but the simulator starts from an actual reading or from a blank
+  // the operator fills, never from a demonstration.
+  const latestReading = pan.latest_observation ?? null;
+  const salinitySource =
+    latestReading && !isDemonstrationSource(latestReading.data_source)
+      ? latestReading.salinity_g_l
+      : null;
 
   // Seeded from the pan's registered geometry and its newest recorded salinity.
   // A salinity nobody measured stays blank rather than being filled from the
@@ -311,8 +334,8 @@ export default function SimulatorPanel({
               unit="g/L"
               hint={
                 salinitySource === null
-                  ? "No reading recorded — enter a value to run a what-if."
-                  : "From the newest recorded observation."
+                  ? "No measured salinity recorded — enter a value to run a what-if."
+                  : `From the newest recorded observation (${latestReading?.data_source}).`
               }
               value={form.initial_salinity_g_l}
               error={errors.initial_salinity_g_l}
@@ -411,7 +434,7 @@ export default function SimulatorPanel({
                     key={depth}
                     rainfallMm={depth}
                     selected={selected === depth}
-                    onSelect={setSelected}
+                    onSelect={handleSelect}
                   />
                 ))}
                 {customDepths.map((depth) => (
@@ -419,7 +442,7 @@ export default function SimulatorPanel({
                     key={depth}
                     rainfallMm={depth}
                     selected={selected === depth}
-                    onSelect={setSelected}
+                    onSelect={handleSelect}
                   />
                 ))}
               </div>

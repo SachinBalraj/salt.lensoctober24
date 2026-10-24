@@ -1,13 +1,21 @@
 import { describe, expect, it } from "vitest";
 import {
   classProbabilityRows,
+  DEFAULT_TRAINING_REQUIREMENT,
   describeFeatureCoverage,
   formatModel,
   formatProbability,
+  GATED_BY_DEPLOYMENT_MESSAGE,
   hasProbability,
+  MODEL_DEPLOYMENT_REQUIRED_MESSAGE,
+  MODEL_EVALUATION_REQUIRED_MESSAGE,
   NO_DEPLOYED_MODEL_MESSAGE,
   reportsNoProbability,
+  trainingProgress,
+  trainingRequirement,
+  unavailableMessage,
   type RiskPrediction,
+  type TrainingGate,
 } from "@/lib/riskPrediction";
 
 function prediction(
@@ -154,5 +162,133 @@ describe("describeFeatureCoverage", () => {
     ).toBe(
       "1 of 3 features came from the twin state; 2 were imputed by the model.",
     );
+  });
+});
+
+const GATE: TrainingGate = {
+  ready: false,
+  genuine_labelled_rows: 0,
+  distinct_pans_in_labels: 0,
+  min_total_labelled_rows: 80,
+  min_distinct_pans: 3,
+};
+
+describe("unavailableMessage", () => {
+  it("gives each state its own sentence", () => {
+    expect(unavailableMessage("no_model", "server prose")).toBe(
+      NO_DEPLOYED_MODEL_MESSAGE,
+    );
+    expect(unavailableMessage("not_evaluated", "server prose")).toBe(
+      MODEL_EVALUATION_REQUIRED_MESSAGE,
+    );
+    expect(unavailableMessage("not_deployed", "server prose")).toBe(
+      MODEL_DEPLOYMENT_REQUIRED_MESSAGE,
+    );
+    // The missing-inputs state names the fields that arrived empty...
+    expect(
+      unavailableMessage("missing_inputs", "server prose", [
+        "current_salinity_g_l",
+        "water_depth_cm",
+      ]),
+    ).toBe(
+      "Prediction unavailable — missing: current_salinity_g_l, water_depth_cm",
+    );
+    // ...and falls back to the server's explanation rather than showing a
+    // sentence with an empty list after it.
+    expect(unavailableMessage("missing_inputs", "Pan has no twin state.")).toBe(
+      "Pan has no twin state.",
+    );
+    // A refusal this client does not model is passed through, not flattened
+    // into a sentence that means a different state.
+    expect(unavailableMessage("failed", "something unmodelled")).toBe(
+      "something unmodelled",
+    );
+  });
+
+  it("never renders one lifecycle state as another", () => {
+    // The three are three different next steps in three different modules. If
+    // two produced the same sentence an operator could not tell whether to go
+    // and train, evaluate or deploy.
+    const sentences = [
+      unavailableMessage("no_model", "x"),
+      unavailableMessage("not_evaluated", "x"),
+      unavailableMessage("not_deployed", "x"),
+    ];
+    expect(new Set(sentences).size).toBe(3);
+  });
+
+  it("never puts a percentage in any refused state", () => {
+    // No refusal carries a figure, so none can be mistaken for a score.
+    for (const state of [
+      "no_model",
+      "not_evaluated",
+      "not_deployed",
+      "missing_inputs",
+      "failed",
+    ] as const) {
+      expect(unavailableMessage(state, "prose", ["a"])).not.toMatch(/%/);
+    }
+  });
+});
+
+describe("trainingRequirement", () => {
+  it("is built from the gate's own thresholds, not from literals here", () => {
+    expect(
+      trainingRequirement({
+        ...GATE,
+        min_total_labelled_rows: 120,
+        min_distinct_pans: 5,
+      }),
+    ).toBe(
+      "Collect at least 120 genuine labelled outcomes across at least 5 distinct pans before training.",
+    );
+  });
+
+  it("falls back to the documented wording when the gate could not be read", () => {
+    expect(trainingRequirement(null)).toBe(DEFAULT_TRAINING_REQUIREMENT);
+    expect(
+      trainingRequirement({
+        ...GATE,
+        min_total_labelled_rows: null,
+        min_distinct_pans: null,
+      }),
+    ).toBe(DEFAULT_TRAINING_REQUIREMENT);
+    // The fallback still states numbers a reader would act on, and is itself
+    // asserted against the backend's thresholds in the backend suite.
+    expect(DEFAULT_TRAINING_REQUIREMENT).toContain("80");
+    expect(DEFAULT_TRAINING_REQUIREMENT).toContain("3 distinct pans");
+  });
+});
+
+describe("trainingProgress", () => {
+  it("reports counts rather than a percentage", () => {
+    expect(trainingProgress(GATE)).toBe(
+      "0 of 80 genuine labelled outcomes on file, across 0 of 3 distinct pans.",
+    );
+    expect(
+      trainingProgress({
+        ...GATE,
+        genuine_labelled_rows: 42,
+        distinct_pans_in_labels: 2,
+      }),
+    ).toBe(
+      "42 of 80 genuine labelled outcomes on file, across 2 of 3 distinct pans.",
+    );
+  });
+
+  it("says nothing once the gate is met, or when there is nothing to report", () => {
+    expect(trainingProgress({ ...GATE, ready: true })).toBeNull();
+    expect(trainingProgress(null)).toBeNull();
+  });
+});
+
+describe("why there is no figure", () => {
+  it("states the cause before the requirement, and neither carries a number", () => {
+    expect(GATED_BY_DEPLOYMENT_MESSAGE).toContain(
+      "validated model has not yet been deployed",
+    );
+    // Neither sentence could be read as a risk score.
+    expect(GATED_BY_DEPLOYMENT_MESSAGE).not.toMatch(/%/);
+    expect(DEFAULT_TRAINING_REQUIREMENT).not.toMatch(/%/);
   });
 });

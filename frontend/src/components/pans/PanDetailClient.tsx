@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import ObservationPanel from "@/components/observations/ObservationPanel";
 import OutcomePanel from "@/components/outcomes/OutcomePanel";
 import DecisionPanel from "@/components/decisions/DecisionPanel";
@@ -49,6 +49,34 @@ export default function PanDetailClient({ panId }: { panId: string }) {
   const [actionError, setActionError] = useState<ApiError | null>(null);
   const [deactivating, setDeactivating] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  // The selected what-if rainfall from Module 06, shared with Module 12 so
+  // the recommendation uses the same scenario the user is inspecting.
+  const [selectedRainfallMm, setSelectedRainfallMm] = useState<number>(20);
+
+  // Module 05 joins records that Modules 03 and 04 write on this same page. The
+  // twin is a read over the observation and weather collections, so it has to
+  // re-read them after a save; the `pan` document it also reads was fetched when
+  // the page opened and is refreshed by the token below. This counter is bumped
+  // on each save so the twin re-reads the join against the record that was just
+  // written. It re-reads only; it never stores a snapshot, so a save cannot
+  // manufacture twin history.
+  const [twinEvidenceToken, setTwinEvidenceToken] = useState(0);
+  /**
+   * Bumped by Module 03/04 alongside the twin's token, to re-read the pan itself.
+   *
+   * The pan document carries a denormalised copy of the newest observation, and
+   * Module 06 reads that copy to decide whether a measured salinity exists. The
+   * twin re-reads its own join on the same signal, and Module 03 re-reads its own
+   * latest-reading card — but the `pan` this component holds was fetched when the
+   * page opened, so without this the simulator keeps reasoning about a pan as it
+   * was before the operator's first reading, while the panels either side of it
+   * report that reading as current.
+   */
+  const [panToken, setPanToken] = useState(0);
+  const onEvidenceRecorded = useCallback(() => {
+    setTwinEvidenceToken((token) => token + 1);
+    setPanToken((token) => token + 1);
+  }, []);
 
   const requestKey = `${panId}|${reloadToken}`;
 
@@ -62,6 +90,8 @@ export default function PanDetailClient({ panId }: { panId: string }) {
     [isDemo, panId],
   );
 
+  // The first load of a pan, and the only load that shows the skeleton: the
+  // panels below are unmounted while it runs, because there is nothing to show.
   useEffect(() => {
     if (isDemo) return;
     let cancelled = false;
@@ -86,6 +116,36 @@ export default function PanDetailClient({ panId }: { panId: string }) {
       cancelled = true;
     };
   }, [requestKey, isDemo, panId]);
+
+  // A quiet re-read of the same pan after a Module 03/04 save.
+  //
+  // Unlike the load above it never clears the pan already on screen and never
+  // trips `loading`, which is gated on `requestKey` alone. Showing the skeleton
+  // here would unmount every panel on the page and take the operator's run, their
+  // typed what-if values and their open recommendation with it, over a save that
+  // changed one denormalised field. A failed refresh also leaves the last good
+  // pan visible: the record itself is already stored, and blanking the page after
+  // a successful save would be a worse outcome than a briefly stale panel.
+  useEffect(() => {
+    if (isDemo || panToken === 0) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const loaded = await getPan(panId);
+        if (cancelled) return;
+        setState((current) =>
+          current !== null && current.key === requestKey
+            ? { key: requestKey, pan: loaded, error: current.error }
+            : current,
+        );
+      } catch {
+        // Keep the pan already on screen.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [panToken, requestKey, isDemo, panId]);
 
   const loading = !isDemo && state?.key !== requestKey;
   const pan = isDemo ? demoPan : (state?.pan ?? null);
@@ -388,37 +448,56 @@ export default function PanDetailClient({ panId }: { panId: string }) {
           Module 03 — Pan observation
         </h2>
       </div>
-      <ObservationPanel pan={pan} isDemo={isDemo} />
+      <ObservationPanel
+        pan={pan}
+        isDemo={isDemo}
+        onEvidenceRecorded={onEvidenceRecorded}
+      />
 
       <div className="mt-8">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">
           Module 04 — Weather data
         </h2>
       </div>
-      <WeatherPanel pan={pan} isDemo={isDemo} />
+      <WeatherPanel
+        pan={pan}
+        isDemo={isDemo}
+        onEvidenceRecorded={onEvidenceRecorded}
+      />
 
       <div className="mt-8">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">
           Module 05 — Digital twin
         </h2>
       </div>
-      <DigitalTwinPanel pan={pan} isDemo={isDemo} />
+      <DigitalTwinPanel
+        pan={pan}
+        isDemo={isDemo}
+        evidenceToken={twinEvidenceToken}
+      />
 
       <div className="mt-8">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">
           Module 06 — What-if rainfall simulator
         </h2>
       </div>
-      {/* Keyed by pan so a what-if run never survives onto a different pan. */}
-      <SimulatorPanel key={pan.pan_id} pan={pan} isDemo={isDemo} />
+      {/* Keyed by pan so a what-if run never survives onto a different pan.
+          The prefix keeps this key unique among its siblings. */}
+      <SimulatorPanel
+        key={`simulator-${pan.pan_id}`}
+        pan={pan}
+        isDemo={isDemo}
+        onSelectedRainfallChange={setSelectedRainfallMm}
+      />
 
       <div className="mt-8">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">
           Module 10 — Operational risk
         </h2>
       </div>
-      {/* Keyed by pan so a prediction never survives onto a different pan. */}
-      <RiskPredictionPanel key={pan.pan_id} pan={pan} isDemo={isDemo} />
+      {/* Keyed by pan so a prediction never survives onto a different pan.
+          The prefix keeps this key unique among its siblings. */}
+      <RiskPredictionPanel key={`risk-${pan.pan_id}`} pan={pan} isDemo={isDemo} />
 
       <div className="mt-8">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">
@@ -428,7 +507,12 @@ export default function PanDetailClient({ panId }: { panId: string }) {
       {/* Keyed by pan so a recommendation never survives onto a different pan, and
           so the advice is asked for on this pan rather than appearing already
           answered from the last one. */}
-      <DecisionPanel key={pan.pan_id} pan={pan} isDemo={isDemo} />
+      <DecisionPanel
+        key={`decision-${pan.pan_id}`}
+        pan={pan}
+        isDemo={isDemo}
+        rainfallMm={selectedRainfallMm}
+      />
 
       <div className="mt-8">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">

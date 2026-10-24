@@ -25,6 +25,39 @@ export type LatestObservation = {
   data_source: string;
 };
 
+/**
+ * The operator's own limits for one pan, as stored on the pan document.
+ *
+ * **Every field is nullable, and null means "not configured" — it does not mean
+ * zero.** These are the numbers a decision rule compares against, and this project
+ * supplies none of them: a flood depth, a dilution floor, a critical rainfall and a
+ * transfer depth are judgements about a particular pan that only the operator can
+ * make. A rule that needs a limit nobody configured is refused rather than served a
+ * code default. See the backend `RiskThresholds` model and the reference rule's
+ * `bound_variable` criteria.
+ */
+export type RiskThresholds = {
+  /** Depth above which the pan should be drained, in cm. */
+  flood_depth_cm: number | null;
+  /** Salinity below which the brine is too dilute to sell, in g/L. */
+  dilution_salinity_g_l: number | null;
+  /** Rainfall over 24 h above which the pan is at risk, in mm. */
+  critical_rainfall_24h_mm: number | null;
+  /** Depth the operator keeps while transferring brine, in cm. */
+  target_flow_cm: number | null;
+  /** Oldest reading that may still support a recommendation, in hours. */
+  max_observation_age_hours: number | null;
+};
+
+/** Every threshold unset. Not a set of defaults: an empty configuration. */
+export const EMPTY_RISK_THRESHOLDS: RiskThresholds = {
+  flood_depth_cm: null,
+  dilution_salinity_g_l: null,
+  critical_rainfall_24h_mm: null,
+  target_flow_cm: null,
+  max_observation_age_hours: null,
+};
+
 /** A salt pan exactly as the backend returns it. */
 export type SaltPan = {
   id: string | null;
@@ -36,6 +69,21 @@ export type SaltPan = {
   area_m2: number;
   normal_depth_cm: number;
   target_harvest_salinity_g_l: number;
+  /**
+   * The pan's operator-configured limits. The backend always returns this object
+   * (all-null when nothing is set); a response that omits it is read as nothing
+   * configured rather than as a reason to fail, which is why it is optional here.
+   */
+  risk_thresholds?: RiskThresholds;
+  /**
+   * The farmer contact, as the read API returns it: a name and a *masked* number.
+   *
+   * The unmasked number is deliberately absent from every read. The send endpoint
+   * does not need it from the browser — it reads the pan itself — so there is no
+   * case where a client has a reason to hold it.
+   */
+  farmer_name: string | null;
+  farmer_whatsapp_masked: string | null;
   is_active: boolean;
   created_at: string;
   updated_at: string;
@@ -62,6 +110,15 @@ export type SaltPanRegistration = {
   area_m2: number;
   normal_depth_cm: number;
   target_harvest_salinity_g_l: number;
+  /**
+   * The operator's own limits for this pan. Omitted fields are limits nobody has
+   * configured; the backend stores them as null. Sent as a whole block so the
+   * operator's configuration is explicit rather than assumed.
+   */
+  risk_thresholds?: RiskThresholds;
+  /** Optional. Omit to register a pan nobody can be messaged about yet. */
+  farmer_name?: string | null;
+  farmer_whatsapp?: string | null;
 };
 
 /**
@@ -84,6 +141,23 @@ export type SaltPanFormValues = {
   area_m2: string;
   normal_depth_cm: string;
   target_harvest_salinity_g_l: string;
+  /**
+   * The operator's limits, held as raw strings like every other numeric input.
+   * A blank field is a limit nobody configured — it is submitted as null, not as
+   * zero, because zero is a number this project would be inventing.
+   */
+  flood_depth_cm: string;
+  dilution_salinity_g_l: string;
+  critical_rainfall_24h_mm: string;
+  target_flow_cm: string;
+  max_observation_age_hours: string;
+  /**
+   * Write-only: the stored number is never returned, so this starts blank on the
+   * edit form and typing a value replaces whatever is recorded. Blank means "leave
+   * it as it is", not "remove it".
+   */
+  farmer_name: string;
+  farmer_whatsapp: string;
 };
 
 export const EMPTY_PAN_FORM: SaltPanFormValues = {
@@ -95,6 +169,13 @@ export const EMPTY_PAN_FORM: SaltPanFormValues = {
   area_m2: "",
   normal_depth_cm: "",
   target_harvest_salinity_g_l: "",
+  flood_depth_cm: "",
+  dilution_salinity_g_l: "",
+  critical_rainfall_24h_mm: "",
+  target_flow_cm: "",
+  max_observation_age_hours: "",
+  farmer_name: "",
+  farmer_whatsapp: "",
 };
 
 export type PanFormErrors = Partial<Record<keyof SaltPanFormValues, string>>;
@@ -162,6 +243,98 @@ export function validatePositiveMeasurement(
   { label, unit }: { label: string; unit: string },
 ): CoercedField {
   return parseNumericField(raw, { required: true, label, unit });
+}
+
+/**
+ * The five operator limits, with the label, unit and lower bound the backend
+ * enforces: `flood_depth_cm`, `dilution_salinity_g_l` and `critical_rainfall_24h_mm`
+ * may be zero, while `target_flow_cm` and `max_observation_age_hours` must be
+ * greater than zero. Declared as data so the form, the validator and their tests
+ * name the same fields in the same order.
+ */
+export const RISK_THRESHOLD_SPECS = [
+  { field: "flood_depth_cm", label: "Flood depth", unit: "cm", allowZero: true },
+  {
+    field: "dilution_salinity_g_l",
+    label: "Dilution salinity",
+    unit: "g/L",
+    allowZero: true,
+  },
+  {
+    field: "critical_rainfall_24h_mm",
+    label: "Critical rainfall (24 h)",
+    unit: "mm",
+    allowZero: true,
+  },
+  {
+    field: "target_flow_cm",
+    label: "Target transfer depth",
+    unit: "cm",
+    allowZero: false,
+  },
+  {
+    field: "max_observation_age_hours",
+    label: "Maximum reading age",
+    unit: "h",
+    allowZero: false,
+  },
+] as const;
+
+export type RiskThresholdField = (typeof RISK_THRESHOLD_SPECS)[number]["field"];
+
+/**
+ * Validates one operator limit.
+ *
+ * **A blank field is valid and means "not configured"**, returning `null` rather
+ * than an error, because a limit nobody set is a legitimate state and not an
+ * incomplete form. The bounds mirror `RiskThresholdsWrite` on the backend: the
+ * three depth/rainfall/salinity limits accept zero, while the transfer depth and the
+ * freshness window must be positive.
+ */
+export function validateRiskThreshold(
+  raw: string,
+  { label, unit, allowZero }: { label: string; unit: string; allowZero: boolean },
+): CoercedField {
+  const trimmed = raw.trim();
+  if (trimmed === "") return { value: null, error: null };
+  if (!/^-?\d*\.?\d+$/.test(trimmed)) {
+    return { value: null, error: `${label} must be a number.` };
+  }
+  const parsed = Number(trimmed);
+  if (!Number.isFinite(parsed)) {
+    return { value: null, error: `${label} must be a finite number.` };
+  }
+  if (allowZero) {
+    if (parsed < 0) {
+      return { value: null, error: `${label} must be 0 or greater.` };
+    }
+  } else if (parsed <= 0) {
+    return { value: null, error: `${label} must be greater than 0 ${unit}.` };
+  }
+  return { value: parsed, error: null };
+}
+
+/**
+ * Validates the whole operator-limits block, returning the value to submit and any
+ * field errors. Always returns all five keys, so the block can be submitted whole:
+ * a blank field becomes null ("not configured") rather than being dropped, which is
+ * what lets an operator clear a limit they had set.
+ */
+export function validateRiskThresholds(values: SaltPanFormValues): {
+  value: RiskThresholds;
+  errors: Partial<Record<RiskThresholdField, string>>;
+} {
+  const value: RiskThresholds = { ...EMPTY_RISK_THRESHOLDS };
+  const errors: Partial<Record<RiskThresholdField, string>> = {};
+  for (const spec of RISK_THRESHOLD_SPECS) {
+    const result = validateRiskThreshold(values[spec.field], spec);
+    if (result.error) {
+      errors[spec.field] = result.error;
+    } else {
+      value[spec.field] = result.value;
+    }
+  }
+  return { value, errors };
 }
 
 /**
@@ -277,6 +450,18 @@ export function validateRegistration(
     partnerPresent: values.latitude.trim() !== "",
   });
 
+  const farmerName = validateFarmerName(values.farmer_name);
+  // Only validated when a number was typed. A pan with no farmer recorded is a
+  // legitimate registration, not an incomplete one, so the field is not required.
+  const whatsapp =
+    values.farmer_whatsapp.trim() === ""
+      ? { value: null, error: null }
+      : validateWhatsAppNumber(values.farmer_whatsapp);
+
+  // The operator's own limits. None is required: an unconfigured limit is a state
+  // the system is built to report, not a form that has been filled in wrongly.
+  const thresholds = validateRiskThresholds(values);
+
   const errors: PanFormErrors = {};
   if (panId.error) errors.pan_id = panId.error;
   if (panName.error) errors.pan_name = panName.error;
@@ -286,6 +471,9 @@ export function validateRegistration(
   if (salinity.error) errors.target_harvest_salinity_g_l = salinity.error;
   if (latitude.error) errors.latitude = latitude.error;
   if (longitude.error) errors.longitude = longitude.error;
+  if (farmerName.error) errors.farmer_name = farmerName.error;
+  if (whatsapp.error) errors.farmer_whatsapp = whatsapp.error;
+  Object.assign(errors, thresholds.errors);
 
   const hasErrors = Object.keys(errors).length > 0;
   const measurementsMissing =
@@ -305,6 +493,9 @@ export function validateRegistration(
       area_m2: area.value as number,
       normal_depth_cm: depth.value as number,
       target_harvest_salinity_g_l: salinity.value as number,
+      risk_thresholds: thresholds.value,
+      farmer_name: farmerName.value,
+      farmer_whatsapp: whatsapp.value,
     },
     errors: {},
   };
@@ -320,7 +511,10 @@ export function validateRegistration(
  */
 export function validateUpdate(
   values: SaltPanFormValues,
-  { includePanId = false }: { includePanId?: boolean } = {},
+  {
+    includePanId = false,
+    panHasFarmerName = false,
+  }: { includePanId?: boolean; panHasFarmerName?: boolean } = {},
 ): { payload: SaltPanUpdate | null; errors: PanFormErrors } {
   const errors: PanFormErrors = {};
   const payload: Record<string, unknown> = {};
@@ -378,6 +572,38 @@ export function validateUpdate(
     payload.longitude = longitude.value;
   }
 
+  // The name is included whenever it is non-empty, and cleared by an explicit empty
+  // string rather than by omission — an operator who clears a name means to clear
+  // it. The number is different: it is never returned by the read API, so the form
+  // is always blank, and omission is the only way to express "leave the recorded
+  // number alone". Typing a value replaces it.
+  const farmerName = validateFarmerName(values.farmer_name);
+  if (farmerName.error) {
+    errors.farmer_name = farmerName.error;
+  } else if (values.farmer_name.trim() !== "" || panHasFarmerName) {
+    payload.farmer_name = farmerName.value;
+  }
+
+  if (values.farmer_whatsapp.trim() !== "") {
+    const whatsapp = validateWhatsAppNumber(values.farmer_whatsapp);
+    if (whatsapp.error) {
+      errors.farmer_whatsapp = whatsapp.error;
+    } else {
+      payload.farmer_whatsapp = whatsapp.value;
+    }
+  }
+
+  // The operator's limits are submitted as a whole block, matching the backend,
+  // which replaces the block rather than merging into it. Because the edit form is
+  // pre-filled from the stored pan, saving without touching them re-sends what is
+  // already there, and clearing a field clears that limit rather than leaving the
+  // old value in place.
+  const thresholds = validateRiskThresholds(values);
+  Object.assign(errors, thresholds.errors);
+  if (Object.keys(thresholds.errors).length === 0) {
+    payload.risk_thresholds = thresholds.value;
+  }
+
   if (Object.keys(errors).length > 0) {
     return { payload: null, errors };
   }
@@ -391,6 +617,7 @@ export function normalizePanId(value: string): string {
 
 /** Seeds the edit form from a stored pan. */
 export function panToFormValues(pan: SaltPan): SaltPanFormValues {
+  const thresholds = pan.risk_thresholds ?? EMPTY_RISK_THRESHOLDS;
   return {
     pan_id: pan.pan_id,
     pan_name: pan.pan_name,
@@ -400,7 +627,27 @@ export function panToFormValues(pan: SaltPan): SaltPanFormValues {
     area_m2: String(pan.area_m2),
     normal_depth_cm: String(pan.normal_depth_cm),
     target_harvest_salinity_g_l: String(pan.target_harvest_salinity_g_l),
+    // A stored null is shown as a blank field, because a limit nobody configured is
+    // exactly what an empty box means. The operator sees at a glance what is set
+    // and what a rule would still be refused for.
+    flood_depth_cm: thresholdToString(thresholds.flood_depth_cm),
+    dilution_salinity_g_l: thresholdToString(thresholds.dilution_salinity_g_l),
+    critical_rainfall_24h_mm: thresholdToString(thresholds.critical_rainfall_24h_mm),
+    target_flow_cm: thresholdToString(thresholds.target_flow_cm),
+    max_observation_age_hours: thresholdToString(
+      thresholds.max_observation_age_hours,
+    ),
+    // The name round-trips because it is not sensitive. The number does not: only
+    // the mask ever leaves the server, so the field starts blank and the operator
+    // types a number to replace whatever is recorded.
+    farmer_name: pan.farmer_name ?? "",
+    farmer_whatsapp: "",
   };
+}
+
+/** Renders a stored limit as an input value; an unconfigured limit is blank. */
+function thresholdToString(value: number | null | undefined): string {
+  return value === null || value === undefined ? "" : String(value);
 }
 
 /**
@@ -447,4 +694,88 @@ export function formatDateTime(value: string | null): string {
     timeStyle: "short",
     timeZone: "UTC",
   }).format(parsed);
+}
+
+/**
+ * Farmer contact validation, mirroring the backend's `app/models/phone.py`.
+ *
+ * **The rule is E.164 and nothing softer.** A `+` and a country code, 8 to 15 digits
+ * in total. A national-format number is refused here rather than guessed at: the
+ * backend cannot know which country an operator is dialling from, so a number
+ * without a country code has one correct answer only if a person supplies it, and
+ * guessing would mean messaging a stranger.
+ *
+ * **Separators are stripped, not rejected.** Numbers get read aloud and written down
+ * with spaces, hyphens and parentheses, and `"+91 98765-43210"` is the same number as
+ * `"+919876543210"`. Refusing it would train operators to work around the form.
+ *
+ * **Client validation is a convenience, not the boundary.** The server validates
+ * again and its answer is the one that counts; this exists so an operator finds out
+ * about a typo before submitting rather than after.
+ */
+export const E164_PATTERN = /^\+[1-9]\d{7,14}$/;
+
+/** The minimum and maximum digit counts E.164 permits, inclusive. */
+export const E164_MIN_DIGITS = 8;
+export const E164_MAX_DIGITS = 15;
+
+/**
+ * Turn what was typed into an E.164 number, or explain why it cannot be one.
+ *
+ * Returns the normalised value rather than only a verdict, so the form can submit
+ * the clean form — which is also what gets stored.
+ */
+export function validateWhatsAppNumber(
+  value: string,
+): { value: string | null; error: string | null } {
+  const compact = value.replace(/[\s()\-.]/g, "");
+  if (compact === "") {
+    return {
+      value: null,
+      error:
+        "Enter the farmer's number with its country code, for example +919876543210.",
+    };
+  }
+  if (!compact.startsWith("+")) {
+    return {
+      value: null,
+      error:
+        "Start with + and the country code. A number without one cannot be dialled from outside its own country.",
+    };
+  }
+  const digits = compact.slice(1);
+  if (!/^\d+$/.test(digits)) {
+    return { value: null, error: "A phone number holds digits only, after the +." };
+  }
+  if (digits.length < E164_MIN_DIGITS || digits.length > E164_MAX_DIGITS) {
+    return {
+      value: null,
+      error: `A phone number has ${E164_MIN_DIGITS} to ${E164_MAX_DIGITS} digits after the country code.`,
+    };
+  }
+  if (!E164_PATTERN.test(compact)) {
+    return {
+      value: null,
+      error:
+        "That is not a valid international number. Check the country code and try again.",
+    };
+  }
+  return { value: compact, error: null };
+}
+
+/**
+ * The farmer's name, or absent.
+ *
+ * Optional and unvalidated beyond length, because a name is not a fact the system
+ * reasons about. A pan with no name recorded is still a pan that can be messaged.
+ */
+export function validateFarmerName(
+  value: string,
+): { value: string | null; error: string | null } {
+  const trimmed = value.trim();
+  if (trimmed === "") return { value: null, error: null };
+  if (trimmed.length > 120) {
+    return { value: null, error: "A farmer's name must be 120 characters or fewer." };
+  }
+  return { value: trimmed, error: null };
 }

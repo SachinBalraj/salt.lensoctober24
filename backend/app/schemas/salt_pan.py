@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.models import SaltPan
 from app.models.pan_observation import PAN_ID_PATTERN
+from app.models.phone import WhatsAppNumber, mask_phone
 from app.models.salt_pan import LatestObservationState, RiskThresholds
 
 
@@ -182,6 +183,25 @@ class SaltPanRegistration(BaseModel):
             "rather than served a default."
         ),
     )
+    farmer_name: str | None = Field(
+        default=None,
+        max_length=128,
+        description=(
+            "The person who works this pan. Optional: a pan may be registered "
+            "before anybody is recorded against it, and the WhatsApp action then "
+            "reports the contact as not configured."
+        ),
+        examples=["R. Patel"],
+    )
+    farmer_whatsapp: WhatsAppNumber = Field(
+        default=None,
+        description=(
+            "The farmer's WhatsApp number in international format, e.g. "
+            "+919876543210. Separators are accepted and normalised away; a number "
+            "without a country code is refused rather than guessed at."
+        ),
+        examples=["+919876543210"],
+    )
 
     @model_validator(mode="after")
     def _validate_coordinates(self) -> SaltPanRegistration:
@@ -225,6 +245,22 @@ class SaltPanUpdate(BaseModel):
             "Replace this pan's operator-configured limits. Supplying the object "
             "replaces it whole, so a field left out of an update becomes "
             "unconfigured rather than silently keeping its old value."
+        ),
+    )
+    farmer_name: str | None = Field(
+        default=None,
+        max_length=128,
+        description=(
+            "The person who works this pan. Send null to clear it, which leaves "
+            "the WhatsApp action with a name and no number."
+        ),
+    )
+    farmer_whatsapp: WhatsAppNumber = Field(
+        default=None,
+        description=(
+            "The farmer's WhatsApp number in international format. Send null to "
+            "clear it, which makes the WhatsApp action report the contact as not "
+            "configured."
         ),
     )
 
@@ -303,6 +339,21 @@ class SaltPanRead(BaseModel):
             "recorded; it is never estimated or pre-filled."
         ),
     )
+    farmer_name: str | None = Field(
+        default=None,
+        description="The person recorded as working this pan, or null.",
+    )
+    farmer_whatsapp_masked: str | None = Field(
+        default=None,
+        description=(
+            "The farmer's WhatsApp number, masked to its country code and last two "
+            "digits. This is the only form of the number any read returns: a list "
+            "of every pan in a deployment is otherwise a directory of every farmer "
+            "in it, and an edit form does not need the digits to leave them alone. "
+            "Null when no number is configured."
+        ),
+        examples=["+919•••••••10"],
+    )
 
     @classmethod
     def from_pan(cls, pan: SaltPan) -> SaltPanRead:
@@ -326,6 +377,8 @@ class SaltPanRead(BaseModel):
                 if pan.latest_observation is not None
                 else None
             ),
+            farmer_name=pan.farmer_name,
+            farmer_whatsapp_masked=mask_phone(pan.farmer_whatsapp),
         )
 
 

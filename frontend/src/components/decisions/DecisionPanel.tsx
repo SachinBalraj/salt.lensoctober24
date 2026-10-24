@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useState } from "react";
 import { Button, Spinner } from "@/components/ui/Controls";
 import { Alert, EmptyState } from "@/components/ui/Feedback";
@@ -27,6 +28,17 @@ import { ADVICE_REFUSAL_REMEDIES } from "@/lib/decisionsRefusals";
 import { DEMO_DATA_NOTICE } from "@/lib/demoPans";
 import { formatDateTime } from "@/lib/pans";
 import type { SaltPan } from "@/lib/pans";
+import {
+  farmerWhatsAppLink,
+  whatsappCanRetry,
+  whatsappUnavailableMessage,
+} from "@/lib/whatsappApi";
+import {
+  refusalIsConfigurable,
+  type WhatsAppLink,
+  type WhatsAppRefusal,
+} from "@/lib/whatsapp";
+import { buildFarmerWhatsAppMessage } from "@/lib/whatsappMessage";
 
 interface LoadedState {
   advice: DecisionAdvice | null;
@@ -64,13 +76,23 @@ function asApiError(caught: unknown, fallback: string): ApiError {
  * Advice is asked for, not computed on render: each request stores a
  * recommendation, and opening the page should not quietly write history. The button
  * is the explicit act.
+ *
+ * **Sharing with the farmer is a second explicit act, and it sends nothing.** The
+ * button under the result builds the message from this recommendation and the pan,
+ * asks the server for a `wa.me` link against the number already on file, and opens
+ * it. WhatsApp opens on the operator's own device with the text pre-filled, and the
+ * operator presses send there. Nothing is transmitted by this panel, nothing is
+ * recorded, and a pan with no farmer number on file is told so rather than offered a
+ * button that could not work.
  */
 export default function DecisionPanel({
   pan,
   isDemo,
+  rainfallMm,
 }: {
   pan: SaltPan;
   isDemo?: boolean;
+  rainfallMm?: number;
 }) {
   const panId = pan.pan_id;
   const [state, setState] = useState<LoadedState | null>(null);
@@ -81,7 +103,11 @@ export default function DecisionPanel({
     setState(null);
     void (async () => {
       try {
-        const advice = await advise({ panId });
+        const params: { panId: string; rainfallMm?: number } = { panId };
+        if (typeof rainfallMm === "number") {
+          params.rainfallMm = rainfallMm;
+        }
+        const advice = await advise(params);
         setState({ advice, error: null });
       } catch (caught) {
         setState({
@@ -92,7 +118,7 @@ export default function DecisionPanel({
         setAsking(false);
       }
     })();
-  }, [panId]);
+  }, [panId, rainfallMm]);
 
   if (isDemo) {
     return (
@@ -141,7 +167,7 @@ export default function DecisionPanel({
         ) : state.error ? (
           <Refused error={state.error} onRetry={ask} />
         ) : state.advice ? (
-          <AdviceBody advice={state.advice} />
+          <AdviceBody advice={state.advice} pan={pan} />
         ) : null}
       </div>
     </Card>
@@ -184,7 +210,13 @@ function Refused({ error, onRetry }: { error: ApiError; onRetry: () => void }) {
   );
 }
 
-function AdviceBody({ advice }: { advice: DecisionAdvice }) {
+function AdviceBody({
+  advice,
+  pan,
+}: {
+  advice: DecisionAdvice;
+  pan: SaltPan;
+}) {
   const hasEstimate = adviceHasModelEstimate(advice);
   const stale = estimateIsStale(advice);
   const rows = inputRows(advice);
@@ -254,6 +286,144 @@ function AdviceBody({ advice }: { advice: DecisionAdvice }) {
           </div>
         </dl>
       </div>
+
+      <SendToFarmer pan={pan} advice={advice} />
+    </div>
+  );
+}
+
+/**
+ * Share this recommendation with the farmer on WhatsApp.
+ *
+ * **The message is built here, from the result on screen.** It carries the pan, the
+ * action, the current salinity, the water depth, the rainfall scenario that was
+ * simulated, the simulated salinity after that rain, the pan's harvest target, the
+ * rule that decided and how the advice was reached — plus the statement that no
+ * model was used, whenever that is the truth. Every figure is read from the advice
+ * and the pan; none of it is typed in.
+ *
+ * **Nothing is sent by this panel.** The button asks the server for a `wa.me` link
+ * against the number already stored on the pan and opens it. WhatsApp opens on the
+ * operator's own device with the text pre-filled, and the operator presses send
+ * there. No message is transmitted by this application, and nothing here records
+ * that a message went out.
+ *
+ * **A pan with no farmer number is told so, not offered a button that cannot
+ * work.** The number is masked on screen because that is the only form the browser
+ * is ever given; the server holds the real one and reads it when building the link.
+ */
+function SendToFarmer({
+  pan,
+  advice,
+}: {
+  pan: SaltPan;
+  advice: DecisionAdvice;
+}) {
+  const [opening, setOpening] = useState(false);
+  const [link, setLink] = useState<WhatsAppLink | null>(null);
+  const [error, setError] = useState<ApiError | null>(null);
+
+  const hasNumber = pan.farmer_whatsapp_masked !== null;
+
+  const open = useCallback(() => {
+    if (opening) return;
+    setOpening(true);
+    setError(null);
+    void (async () => {
+      try {
+        const message = buildFarmerWhatsAppMessage({ pan, advice });
+        const result = await farmerWhatsAppLink(pan.pan_id, message);
+        setLink(result);
+        window.open(result.click_to_chat_url, "_blank", "noopener,noreferrer");
+      } catch (caught) {
+        setError(
+          caught instanceof ApiError
+            ? caught
+            : new ApiError("The WhatsApp link could not be prepared.", {
+                status: -1,
+              }),
+        );
+      } finally {
+        setOpening(false);
+      }
+    })();
+  }, [opening, pan, advice]);
+
+  return (
+    <div className="border-t border-line pt-4" data-testid="decision-whatsapp">
+      <Eyebrow>Share with the farmer</Eyebrow>
+      <p className="mt-0.5 text-[12px] text-muted">
+        Builds the message above for this pan&apos;s farmer and opens WhatsApp with it
+        pre-filled. You review it and press send there — this application transmits
+        nothing and records nothing.
+      </p>
+
+      <div className="mt-3 flex flex-wrap items-center gap-3">
+        <Button
+          type="button"
+          variant="primary"
+          onClick={open}
+          disabled={!hasNumber || opening}
+          data-testid="decision-whatsapp-open"
+        >
+          {opening ? (
+            <Spinner label="Preparing the WhatsApp link…" />
+          ) : (
+            "📱 Send to Farmer via WhatsApp"
+          )}
+        </Button>
+        {hasNumber ? (
+          <span
+            className="font-mono text-[12px] text-muted"
+            data-testid="decision-whatsapp-recipient"
+          >
+            To {pan.farmer_whatsapp_masked}
+          </span>
+        ) : null}
+      </div>
+
+      {!hasNumber ? (
+        <p
+          className="mt-2 text-[12px] text-caution"
+          data-testid="decision-whatsapp-missing-number"
+        >
+          No WhatsApp number is stored for this pan. Add the farmer&apos;s number on
+          the pan, then share this recommendation.
+        </p>
+      ) : null}
+
+      {error ? (
+        <Alert
+          tone="warning"
+          title="The link was not prepared"
+          action={
+            whatsappCanRetry(error) ? (
+              <Button type="button" variant="secondary" onClick={open}>
+                Try again
+              </Button>
+            ) : error.code !== null && refusalIsConfigurable(error.code as WhatsAppRefusal) ? (
+              <Link
+                href={`/pans/${encodeURIComponent(pan.pan_id)}/edit`}
+                className="inline-flex items-center rounded-md border border-line px-3 py-1.5 text-[13px] font-medium text-ink hover:bg-inset"
+                data-testid="decision-whatsapp-open-pan"
+              >
+                Edit the pan
+              </Link>
+            ) : undefined
+          }
+        >
+          <span title={error.message} data-testid="decision-whatsapp-error">
+            {whatsappUnavailableMessage(error)}
+          </span>
+        </Alert>
+      ) : null}
+
+      {link ? (
+        <p className="mt-2 text-[12px] text-muted" data-testid="decision-whatsapp-opened">
+          WhatsApp is opening for {link.recipient_contact_reference}. Press send there
+          to deliver it — nothing has been sent from here.
+        </p>
+      ) : null}
     </div>
   );
 }

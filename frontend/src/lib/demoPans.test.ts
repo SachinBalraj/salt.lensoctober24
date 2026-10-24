@@ -5,7 +5,7 @@ import {
   getDemoPans,
   isDemoDataEnabled,
 } from "@/lib/demoPans";
-import { normalizePanId, validateRegistration } from "@/lib/pans";
+import { normalizePanId, panToFormValues, validateRegistration } from "@/lib/pans";
 
 const FLAG = "NEXT_PUBLIC_SALTLENS_DEMO_PANS";
 
@@ -110,6 +110,8 @@ describe("registry records are distinguishable from demo records", () => {
       created_at: "2026-01-05T08:00:00Z",
       updated_at: "2026-01-05T08:00:00Z",
       deactivated_at: null,
+  farmer_name: null,
+  farmer_whatsapp_masked: null,
   latest_observation: null,
     });
     expect(view.origin).toBe("registry");
@@ -128,16 +130,7 @@ describe("demo data cannot become registry data", () => {
   it("has no identifier the registration form would accept as a new record", () => {
     stubFlag("true");
     for (const { pan } of getDemoPans()) {
-      const { payload, errors } = validateRegistration({
-        pan_id: pan.pan_id,
-        pan_name: pan.pan_name,
-        location: pan.location,
-        latitude: pan.latitude === null ? "" : String(pan.latitude),
-        longitude: pan.longitude === null ? "" : String(pan.longitude),
-        area_m2: String(pan.area_m2),
-        normal_depth_cm: String(pan.normal_depth_cm),
-        target_harvest_salinity_g_l: String(pan.target_harvest_salinity_g_l),
-      });
+      const { payload, errors } = validateRegistration(panToFormValues(pan));
       // The form would happily accept a demo-shaped payload, which is exactly
       // why the forms never read from the demo module. This test pins that
       // every demo identifier is nonetheless loudly self-identifying.

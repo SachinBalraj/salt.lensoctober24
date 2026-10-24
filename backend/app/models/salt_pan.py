@@ -11,6 +11,7 @@ from pydantic import (
 
 from app.models.base import BaseDocument, UtcDateTime, normalize_pan_id, utcnow
 from app.models.enums import ResearchDataSource
+from app.models.phone import WhatsAppNumber
 
 
 class RiskThresholds(BaseModel):
@@ -89,6 +90,35 @@ class SaltPan(BaseDocument):
     target_harvest_salinity_g_l: float = Field(gt=0, allow_inf_nan=False)
     risk_thresholds: RiskThresholds
     latest_observation: LatestObservationState | None = None
+
+    #: Who works this pan, and how to reach them.
+    #:
+    #: Both optional and both null on every pan registered before this existed,
+    #: which is why neither carries a default other than null. A pan with no
+    #: farmer on file is a normal state to display — the WhatsApp action reports
+    #: "not configured" rather than refusing — so the absence has to be
+    #: representable without inventing a placeholder contact.
+    #:
+    #: The number is stored in E.164 and masked in every projection, log line and
+    #: audit record. See :mod:`app.models.phone` for why that handling lives in
+    #: one place rather than at each call site.
+    farmer_name: str | None = Field(
+        default=None,
+        max_length=128,
+        description=(
+            "The person who works this pan, as the operator records them. Used to "
+            "address a message; null when nobody has been recorded against it."
+        ),
+    )
+    farmer_whatsapp: WhatsAppNumber = Field(
+        default=None,
+        description=(
+            "The farmer's WhatsApp number in E.164, e.g. +919876543210. Null when "
+            "not configured. Stored normalised, and never returned unmasked by an "
+            "audit record or a log line."
+        ),
+    )
+
     is_active: bool = True
     created_at: UtcDateTime = Field(default_factory=utcnow)
     updated_at: UtcDateTime = Field(default_factory=utcnow)

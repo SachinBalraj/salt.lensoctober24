@@ -1,0 +1,149 @@
+{
+  "manifest_hash": "sha256:504677686a0385d0eaaf0ae21758e33a21dbdd67e254c9ed0471d8a8f948c854",
+  "report": {
+    "classifications": [
+      {
+        "category": "INCOMPLETE_EVIDENCE_EVENT",
+        "event_id": "ev-249b575de8234ff09b341e525ef5d4a1",
+        "evidence_gaps": [
+          "No independent verification was asserted. A figure reported by the person who ran the event is not independently verified.",
+          "Verification state is 'operator_reported', not 'independently_verified'.",
+          "The rainfall figure was not confirmed by an instrument or a second party, so the event's driving input rests on one person's report.",
+          "The post-event timestamp was not verified, so the reading's position in the event rests on one person's record.",
+          "Intervention 'brine_transfer_out' has no recorded volume, so its contribution to the observed change cannot be separated from the rainfall's.",
+          "A brine transfer was reported but its volume was never recorded."
+        ],
+        "independently_verified": false,
+        "intervention_affected": true,
+        "is_accuracy_evidence": false,
+        "pan_id": "pan_orginal",
+        "reasons": [
+          "No independent verification was asserted. A figure reported by the person who ran the event is not independently verified.",
+          "Verification state is 'operator_reported', not 'independently_verified'.",
+          "The rainfall figure was not confirmed by an instrument or a second party, so the event's driving input rests on one person's report.",
+          "The post-event timestamp was not verified, so the reading's position in the event rests on one person's record.",
+          "Intervention 'brine_transfer_out' has no recorded volume, so its contribution to the observed change cannot be separated from the rainfall's.",
+          "A brine transfer was reported but its volume was never recorded.",
+          "The pan was intervened with (brine_transfer_out) between the prediction and the reading. The mass balance excludes brine transfer, drainage, overflow and seepage by name, so a difference here is partly a statement about the intervention rather than about the physics."
+        ]
+      }
+    ],
+    "clean_rainfall_events": 0,
+    "depth": {
+      "absolute_error_mean": {
+        "computed": false,
+        "n": 0,
+        "reason": "Insufficient independently verified events.",
+        "unit": "cm",
+        "value": null
+      },
+      "absolute_errors": [],
+      "bias": {
+        "computed": false,
+        "n": 0,
+        "reason": "Insufficient independently verified events.",
+        "unit": "cm",
+        "value": null
+      },
+      "events_considered": 0,
+      "excluded": 0,
+      "exclusion_reasons": {},
+      "mae": {
+        "computed": false,
+        "n": 0,
+        "reason": "Insufficient independently verified events.",
+        "unit": "cm",
+        "value": null
+      },
+      "pairs_compared": 0,
+      "quantity": "depth",
+      "rmse": {
+        "computed": false,
+        "n": 0,
+        "reason": "Insufficient independently verified events.",
+        "unit": "cm",
+        "value": null
+      },
+      "unit": "cm"
+    },
+    "distinct_pans": [],
+    "incomplete_evidence_events": 1,
+    "independently_verified_events": 0,
+    "intervention_affected_events": 1,
+    "message": "Insufficient independently verified events",
+    "per_event": [
+      {
+        "category": "INCOMPLETE_EVIDENCE_EVENT",
+        "date": "2026-03-14",
+        "depth_absolute_error_cm": 20.999999999999996,
+        "depth_bias_cm": -20.999999999999996,
+        "event_id": "ev-249b575de8234ff09b341e525ef5d4a1",
+        "included_in_metrics": false,
+        "intervention_affected": true,
+        "observed_depth_cm": 50.0,
+        "observed_salinity_g_l": 20.0,
+        "pan_id": "pan_orginal",
+        "predicted_depth_cm": 29.000000000000004,
+        "predicted_salinity_g_l": 172.41379310344828,
+        "reasons": [
+          "No independent verification was asserted. A figure reported by the person who ran the event is not independently verified.",
+          "Verification state is 'operator_reported', not 'independently_verified'.",
+          "The rainfall figure was not confirmed by an instrument or a second party, so the event's driving input rests on one person's report.",
+          "The post-event timestamp was not verified, so the reading's position in the event rests on one person's record.",
+          "Intervention 'brine_transfer_out' has no recorded volume, so its contribution to the observed change cannot be separated from the rainfall's.",
+          "A brine transfer was reported but its volume was never recorded.",
+          "The pan was intervened with (brine_transfer_out) between the prediction and the reading. The mass balance excludes brine transfer, drainage, overflow and seepage by name, so a difference here is partly a statement about the intervention rather than about the physics."
+        ],
+        "salinity_absolute_error_g_l": 152.41379310344828,
+        "salinity_bias_g_l": 152.41379310344828
+      }
+    ],
+    "reasons": [
+      "0 independently verified clean rainfall event(s); at least 3 are needed before MAE, RMSE and bias describe anything other than individual deviations.",
+      "0 distinct pan(s) among those events; at least 2 are needed so the result is not one site measured repeatedly."
+    ],
+    "salinity": {
+      "absolute_error_mean": {
+        "computed": false,
+        "n": 0,
+        "reason": "Insufficient independently verified events.",
+        "unit": "g/L",
+        "value": null
+      },
+      "absolute_errors": [],
+      "bias": {
+        "computed": false,
+        "n": 0,
+        "reason": "Insufficient independently verified events.",
+        "unit": "g/L",
+        "value": null
+      },
+      "events_considered": 0,
+      "excluded": 0,
+      "exclusion_reasons": {},
+      "mae": {
+        "computed": false,
+        "n": 0,
+        "reason": "Insufficient independently verified events.",
+        "unit": "g/L",
+        "value": null
+      },
+      "pairs_compared": 0,
+      "quantity": "salinity",
+      "rmse": {
+        "computed": false,
+        "n": 0,
+        "reason": "Insufficient independently verified events.",
+        "unit": "g/L",
+        "value": null
+      },
+      "unit": "g/L"
+    },
+    "sufficient": false,
+    "thresholds": {
+      "min_clean_events": 3,
+      "min_distinct_pans": 2
+    },
+    "total_events": 1
+  }
+}

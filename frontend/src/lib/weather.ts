@@ -74,6 +74,16 @@ export type WeatherObservation = {
   source: WeatherSource;
   is_forecast: boolean;
   created_at: string;
+  /** The service that supplied the values, when source is `weather_api`. */
+  provider?: string | null;
+  /** Coordinates the service was queried with, when it was. */
+  latitude?: number | null;
+  longitude?: number | null;
+  /** `historical` (archive) or `forecast`, for API-sourced records. */
+  weather_type?: string | null;
+  /** The instant asked for, and when the service answered. */
+  requested_at?: string | null;
+  retrieved_at?: string | null;
 };
 
 export type WeatherObservationListResponse = {

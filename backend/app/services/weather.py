@@ -14,7 +14,7 @@ can make a record look machine-retrieved when nothing fetched it.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import HTTPException, status
@@ -28,6 +28,7 @@ from app.models.base import normalize_pan_id, utcnow
 from app.models.enums import WeatherSource
 from app.models.salt_pan import SaltPan
 from app.models.weather import WeatherObservation
+from app.schemas.weather_fetch import WeatherFetchResult
 from app.schemas.weather import (
     SENSOR_UNAVAILABLE_MESSAGE,
     WeatherIngestResponse,
@@ -111,7 +112,81 @@ class WeatherService:
                 detail=SENSOR_UNAVAILABLE_MESSAGE,
             )
 
+    async def require_registered_pan(self, pan_id: str) -> SaltPan:
+        """Public spelling of the registration guard, for routes outside this file."""
+        return await self._require_registered_pan(pan_id)
+
     # -- writes -----------------------------------------------------------
+
+    async def store_fetched_weather(
+        self, result: WeatherFetchResult
+    ) -> tuple[WeatherObservation, bool]:
+        """Store one reviewed Open-Meteo retrieval under ``source=weather_api``.
+
+        The provenance a record carries is decided here, from the retrieval
+        this server performed, not from anything a client sent. A fetch result
+        for an instant already stored for this pan returns the existing record
+        with ``created=False`` so an operator double-clicking Save cannot write
+        the same reading twice.
+
+        Timestamp rules: a historical record is dated at the instant it
+        describes, because that is when the weather happened. A forecast is
+        dated at retrieval and points forward at ``forecast_for``, because the
+        prediction existed only from the moment it was fetched.
+        """
+        pan = await self._require_registered_pan(result.pan_id)
+        requested = datetime.fromisoformat(
+            result.requested_at.replace("Z", "+00:00")
+        ).astimezone(timezone.utc)
+        retrieved = datetime.fromisoformat(
+            result.retrieved_at.replace("Z", "+00:00")
+        ).astimezone(timezone.utc)
+
+        existing = await self._weather_repository.find(
+            {
+                "pan_id": pan.pan_id,
+                "source": WeatherSource.WEATHER_API,
+                "provider": result.provider,
+                "requested_at": requested,
+            },
+            limit=1,
+        )
+        if existing:
+            return existing[0], False
+
+        if result.weather_type == "historical":
+            timestamp = requested
+            forecast_for = None
+        else:
+            timestamp = min(retrieved, requested)
+            forecast_for = requested
+
+        try:
+            observation = WeatherObservation(
+                pan_id=pan.pan_id,
+                timestamp=timestamp,
+                forecast_for=forecast_for,
+                rainfall_mm=result.rainfall_mm,
+                rainfall_probability_percent=result.rain_probability_percent,
+                ambient_temperature_c=result.ambient_temperature_c,
+                humidity_percent=result.humidity_percent,
+                source=WeatherSource.WEATHER_API,
+                provider=result.provider,
+                latitude=result.latitude,
+                longitude=result.longitude,
+                weather_type=result.weather_type,
+                requested_at=requested,
+                retrieved_at=retrieved,
+            )
+        except (ValidationError, ValueError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    "The retrieved weather contained no usable measurement for "
+                    f"this pan: {exc}"
+                ),
+            ) from exc
+        return await self._weather_repository.insert(observation), True
 
     async def create(self, payload: WeatherObservationCreate) -> WeatherObservation:
         """Store one hand-entered weather record.

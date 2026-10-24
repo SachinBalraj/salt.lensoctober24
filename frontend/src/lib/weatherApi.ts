@@ -157,6 +157,32 @@ export function listWeatherProviders(): Promise<WeatherProvidersResponse> {
   return request<WeatherProvidersResponse>(`${WEATHER_PATH}/providers`);
 }
 
+export type WeatherFetchResponse = {
+  success: boolean;
+  data: WeatherFetchResult | null;
+  message: string;
+  fetch_token: string | null;
+};
+
+export type WeatherFetchResult = {
+  pan_id: string;
+  pan_name?: string;
+  latitude: number;
+  longitude: number;
+  requested_date: string;
+  requested_time: string;
+  requested_at: string;
+  retrieved_at: string;
+  weather_type: "historical" | "forecast" | string;
+  rainfall_mm: number | null;
+  rain_probability_percent: number | null;
+  ambient_temperature_c: number | null;
+  humidity_percent: number | null;
+  provider: string;
+  source_type: string;
+  coordinates_used: { latitude: number; longitude: number };
+};
+
 export type IngestForecastParams = {
   pan_id: string;
   start?: string;
@@ -184,3 +210,38 @@ export function ingestForecast(
 }
 
 export type { WeatherProvider };
+
+export type FetchWeatherParams = {
+  pan_id: string;
+  date: string;
+  time: string;
+};
+
+export function fetchWeatherFromOpenMeteo(
+  params: FetchWeatherParams,
+): Promise<WeatherFetchResponse> {
+  return request<WeatherFetchResponse>(`${WEATHER_PATH}/fetch`, {
+    method: "POST",
+    body: JSON.stringify(params),
+  });
+}
+
+export type WeatherFetchSaveResponse = {
+  record: WeatherObservation;
+  created: boolean;
+  message: string;
+};
+
+/**
+ * Approves a retrieval by its token, so the stored values are the ones the
+ * server fetched rather than whatever the client chose to send back. Nothing
+ * here can label a typed number as API-sourced: only the token travels.
+ */
+export function saveFetchedWeather(
+  fetchToken: string,
+): Promise<WeatherFetchSaveResponse> {
+  return request<WeatherFetchSaveResponse>(`${WEATHER_PATH}/fetch/save`, {
+    method: "POST",
+    body: JSON.stringify({ fetch_token: fetchToken }),
+  });
+}

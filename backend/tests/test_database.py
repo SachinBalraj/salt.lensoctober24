@@ -205,6 +205,53 @@ async def test_an_index_provisioning_failure_is_not_reported_as_a_connection_fai
 
 
 @pytest.mark.asyncio
+async def test_a_recovered_connection_reprovisions_indexes_and_clears_the_error():
+    """Recovery after a dropped ping must not leave ``indexes_ready`` stuck false.
+
+    The connection flag and the index flag are written by the same health pass,
+    so a ping that fails after provisioning used to clear ``indexes_ready``
+    without clearing the attempt flag. The next successful ping then saw the
+    attempt as already made, skipped provisioning and reported ``connected=True``
+    beside a stale ``MongoDB is unreachable.`` -- the same contradiction the
+    provisioning test above guards against, reached from the connection side.
+    """
+
+    class FlakyAdmin(FakeAdmin):
+        def __init__(self):
+            super().__init__()
+            self.fail = False
+
+        async def command(self, name):
+            self.commands += 1
+            if self.fail:
+                raise PyMongoError("ping failed")
+
+    client = FakeClient()
+    client.admin = FlakyAdmin()
+    database = MongoDatabase(
+        uri="mongodb://localhost:27017",
+        database_name="saltlens_test",
+        client_factory=lambda *args, **kwargs: client,
+    )
+    assert await database.connect() == "connected"
+    assert database.indexes_ready is True
+
+    client.admin.fail = True
+    down = await database.check_health()
+    assert down["status"] == "error"
+    assert down["connected"] is False
+    assert database.indexes_ready is False
+
+    client.admin.fail = False
+    recovered = await database.check_health()
+    assert recovered["status"] == "connected"
+    assert recovered["connected"] is True
+    assert recovered["indexes_ready"] is True
+    assert not recovered.get("error")
+    await database.close()
+
+
+@pytest.mark.asyncio
 async def test_failed_ping_keeps_get_db_unavailable():
     client = FakeClient(error=PyMongoError("ping failed"))
     database = MongoDatabase(

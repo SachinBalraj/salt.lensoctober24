@@ -10,6 +10,7 @@ import { ApiError } from "@/lib/api";
 import {
   formatTwinTimestamp,
   isTwinCurrent,
+  isTwinPersisted,
   summarizeAvailability,
   type DigitalTwinState,
 } from "@/lib/digitalTwin";
@@ -55,14 +56,29 @@ function asApiError(caught: unknown, fallback: string): ApiError {
  * design value.
  *
  * Storing a snapshot is an explicit button press. Reading the twin is free, so
- * simply opening this page never manufactures history.
+ * simply opening this page never manufactures history. The one thing that makes
+ * this more than bookkeeping: Module 12 reads a *stored* snapshot, never a live
+ * assembly, so a twin that has not been stored is a twin no recommendation can be
+ * made from yet. The panel therefore says so plainly and offers the one action
+ * that fixes it, rather than leaving the operator to infer the dependency from a
+ * refusal at the bottom of the page.
  */
 export default function DigitalTwinPanel({
   pan,
   isDemo = false,
+  evidenceToken = 0,
 }: {
   pan: SaltPan;
   isDemo?: boolean;
+  /**
+   * Bumped by the panels above when a record is written for this same pan.
+   *
+   * The twin is a join over records that already exist, and the observation and
+   * weather forms sit on this page. Reading is side-effect free, so the twin can
+   * simply be re-read when the evidence changes; it must not store a snapshot on
+   * someone else's save, which would manufacture history.
+   */
+  evidenceToken?: number;
 }) {
   const [reloadToken, setReloadToken] = useState(0);
   const [state, setState] = useState<TwinState | null>(null);
@@ -70,7 +86,7 @@ export default function DigitalTwinPanel({
   const [refreshing, setRefreshing] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
-  const requestKey = `${pan.pan_id}|${reloadToken}`;
+  const requestKey = `${pan.pan_id}|${reloadToken}|${evidenceToken}`;
   const loading = !isDemo && state?.key !== requestKey;
   const historyLoading = !isDemo && history?.key !== requestKey;
 
@@ -96,7 +112,7 @@ export default function DigitalTwinPanel({
     };
   }, [requestKey, isDemo, pan.pan_id]);
 
-  useEffect(() => {
+    useEffect(() => {
     if (isDemo) return;
     let cancelled = false;
     void (async () => {
@@ -133,9 +149,11 @@ export default function DigitalTwinPanel({
       const result = await refreshTwinState(pan.pan_id);
       setState({ key: requestKey, twin: result.state, error: null });
       setNotice(
-        result.changed
-          ? "Snapshot stored. The pan's state has changed since the previous snapshot."
-          : "Snapshot stored. Nothing has changed since the previous snapshot.",
+        `Twin state stored${
+          result.changed
+            ? " and it has changed since the previous snapshot."
+            : "; nothing has changed since the previous snapshot."
+        } The recommendation (Module 12) now reasons from this stored state.`,
       );
       setReloadToken((token) => token + 1);
     } catch (caught) {
@@ -152,6 +170,12 @@ export default function DigitalTwinPanel({
   const current = twin ? isTwinCurrent(twin) : false;
   const snapshots = isDemo ? [] : (history?.snapshots ?? []);
   const total = isDemo ? 0 : (history?.total ?? 0);
+  // Whether the twin on screen has already been stored as a snapshot. Module 12
+  // reasons from the stored state, so this is what tells the operator whether a
+  // recommendation can be made from what they are looking at.
+  const latestSnapshot = snapshots[0] ?? null;
+  const persisted = twin !== null && isTwinPersisted(twin, latestSnapshot);
+  const needsPersisting = twin !== null && !persisted && !historyLoading;
 
   const title = `Current digital twin — pan ${pan.pan_id}`;
 
@@ -234,6 +258,37 @@ export default function DigitalTwinPanel({
                 />
                 <TwinStateCard twin={twin} />
               </Card>
+
+              {needsPersisting ? (
+                <Alert
+                  tone="warning"
+                  title="This twin has not been stored"
+                  action={
+                    <Button
+                      variant="primary"
+                      onClick={() => void handleRefresh()}
+                      disabled={refreshing}
+                    >
+                      {refreshing ? (
+                        <Spinner label="Storing" />
+                      ) : (
+                        "Refresh & persist twin"
+                      )}
+                    </Button>
+                  }
+                >
+                  <p>
+                    These figures are read fresh from this pan&apos;s records, but no
+                    snapshot of them has been stored. The recommended action (Module
+                    12) reasons from the{" "}
+                    <span className="font-medium">stored</span> twin state, so it
+                    will refuse with{" "}
+                    <span className="font-mono text-[12px]">no_twin_state</span> until
+                    this state is persisted. Pressing the button stores exactly what
+                    is shown below.
+                  </p>
+                </Alert>
+              ) : null}
             </>
           ) : null}
 
@@ -257,7 +312,7 @@ export default function DigitalTwinPanel({
                     onClick={() => void handleRefresh()}
                     disabled={refreshing}
                   >
-                    {refreshing ? <Spinner label="Storing" /> : "Store snapshot"}
+                    {refreshing ? <Spinner label="Storing" /> : "Refresh & persist twin"}
                   </Button>
                 </div>
               }

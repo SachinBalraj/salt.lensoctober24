@@ -346,3 +346,46 @@ export function isTwinCurrent(state: DigitalTwinState): boolean {
   const age = oldestInputAge(state);
   return age !== null && age < FRESHNESS.ageing;
 }
+
+/**
+ * The quantities and contributing records a stored snapshot must share with a
+ * freshly assembled read to describe the same state.
+ *
+ * Assembly time is deliberately excluded: it moves on every read and would make
+ * every read look like a change. The contributing record ids are what pin the
+ * state to the evidence it was built from, which is the thing that actually
+ * moves when an operator records something new.
+ */
+function twinStateSignature(state: DigitalTwinState): string {
+  return JSON.stringify([
+    state.salinity_g_l,
+    state.water_depth_cm,
+    state.brine_temperature_c,
+    state.ambient_temperature_c,
+    state.humidity_percent,
+    state.forecast_rainfall_mm,
+    state.rainfall_probability_percent,
+    state.observation?.id ?? null,
+    state.weather?.id ?? null,
+    state.weather_forecast?.id ?? null,
+  ]);
+}
+
+/**
+ * Whether the twin on screen is the stored state Module 12 will reason from.
+ *
+ * The recommended action reads a *stored* twin snapshot, never a live assembly,
+ * so a twin that has just been read from the newest records is not usable for a
+ * recommendation until a snapshot of that same state has been written. That is
+ * the case when no snapshot has ever been stored, and also when a later
+ * observation or forecast has arrived since the last one — the read has moved on
+ * but the stored state has not. Either way the operator is looking at a twin no
+ * recommendation will be made from yet.
+ */
+export function isTwinPersisted(
+  read: DigitalTwinState,
+  latestSnapshot: DigitalTwinState | null,
+): boolean {
+  if (latestSnapshot === null) return false;
+  return twinStateSignature(read) === twinStateSignature(latestSnapshot);
+}

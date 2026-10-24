@@ -9,6 +9,7 @@ from app.api.routers import (
     decisions,
     digital_twin,
     evaluation,
+    experiment_registry,
     experiments,
     explain,
     export,
@@ -23,6 +24,7 @@ from app.api.routers import (
     simulator,
     validation,
     weather,
+    weather_fetch,
 )
 
 all_routers: list[APIRouter] = [
@@ -30,6 +32,7 @@ all_routers: list[APIRouter] = [
     pans.router,
     observations.router,
     weather.router,
+    weather_fetch.router,
     digital_twin.router,
     simulator.router,
     datasets.router,
@@ -44,6 +47,7 @@ all_routers: list[APIRouter] = [
     validation.router,
     model_registry.router,
     export.router,
+    experiment_registry.router,
     experiments.router,
     field_validation.router,
 ]

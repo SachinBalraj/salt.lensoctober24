@@ -6,12 +6,21 @@ import { Badge } from "@/components/ui/Primitives";
 import { ProvenanceCard } from "@/components/dashboard/Provenance";
 import { ApiError } from "@/lib/api";
 import {
+  GATED_BY_DEPLOYMENT_MESSAGE,
   NO_DEPLOYED_MODEL_MESSAGE,
   classProbabilityRows,
   formatProbability,
   reportsNoProbability,
+  trainingProgress,
+  trainingRequirement,
+  unavailableMessage,
   type RiskPrediction,
+  type RiskUnavailableState,
 } from "@/lib/riskPrediction";
+import {
+  predictionState,
+  type RiskModuleStatus,
+} from "@/lib/riskPredictionApi";
 import { formatDateTime } from "@/lib/pans";
 
 /**
@@ -43,6 +52,12 @@ import { formatDateTime } from "@/lib/pans";
  * answers "no model is trained" over the top of a real stored estimate is
  * destroying evidence it was asked to display. The probe only speaks when there
  * is nothing stored to speak over.
+ *
+ * **An absence is stated as the state it is, not as one generic gap.** Nothing
+ * trained, trained-but-never-evaluated, and evaluated-but-never-deployed have
+ * three different remedies in three different modules. The card says which one
+ * applies, from the status probe before the button is pressed and from the
+ * refusal after it, so the two routes to the card cannot disagree.
  */
 export function MlRiskCard({
   prediction,
@@ -50,7 +65,7 @@ export function MlRiskCard({
   loading,
   onPredict,
   hasRun,
-  modelTrained,
+  modelStatus,
 }: {
   prediction: RiskPrediction | null;
   error: ApiError | null;
@@ -58,19 +73,38 @@ export function MlRiskCard({
   onPredict: () => void;
   hasRun: boolean;
   /**
-   * What the backend reports about the model. `false` is a known absence and
-   * gets the project's exact required sentence; `null` is "this client did not
-   * find out" and must not be read as an absence.
+   * What the backend reports about the model, read on mount. `null` is "this
+   * client did not find out" and must not be read as an absence; a `model_state`
+   * of `unknown` means the backend could not read its own registry, and is
+   * treated the same way.
    */
-  modelTrained?: boolean | null;
+  modelStatus?: RiskModuleStatus | null;
 }) {
   // A known-absent model is stated whether or not the button has been pressed, so
   // an operator does not have to click to discover the button has nothing behind
-  // it. Both routes to that state resolve to one sentence, so they cannot
-  // disagree.
-  const noModel =
-    error?.code === "no_deployed_model" ||
-    (modelTrained === false && !prediction);
+  // it. The probe and the refusal resolve to one vocabulary, so they cannot
+  // disagree about which step is missing.
+  const errorState = error ? predictionState(error) : null;
+  const probeState =
+    modelStatus?.model_state === "no_model" ||
+    modelStatus?.model_state === "not_evaluated" ||
+    modelStatus?.model_state === "not_deployed"
+      ? modelStatus.model_state
+      : null;
+  // A refusal this client does not model is shown with the server's own prose
+  // below rather than being read as a state of the registry: nothing is known
+  // about the model from a request that failed for an unknown reason.
+  const unavailableState: RiskUnavailableState | null =
+    errorState === null
+      ? probeState
+      : errorState === "failed"
+        ? null
+        : errorState;
+  // Read once, so the requirement and the counts beside it are two views of the
+  // same gate rather than two separate reads that could disagree.
+  const gate = modelStatus?.training_gate ?? null;
+  const requirement = trainingRequirement(gate);
+  const progress = trainingProgress(gate);
 
   return (
     <ProvenanceCard
@@ -92,11 +126,36 @@ export function MlRiskCard({
         <div className="flex items-center gap-2 py-2 text-[13px] text-muted">
           <Spinner /> Scoring the twin state…
         </div>
-      ) : noModel ? (
+      ) : unavailableState !== null && !prediction ? (
         <Alert tone="info" title="No model estimate">
-          <span title={error?.message ?? NO_DEPLOYED_MODEL_MESSAGE}>
-            {NO_DEPLOYED_MODEL_MESSAGE}
+          <span title={error?.message}>
+            {unavailableMessage(
+              unavailableState,
+              error?.message ?? NO_DEPLOYED_MODEL_MESSAGE,
+            )}
           </span>
+          {unavailableState === "no_model" ? (
+            <>
+              <p className="mt-1 text-[11px]">{GATED_BY_DEPLOYMENT_MESSAGE}</p>
+              <p className="mt-1 text-[11px]">{requirement}</p>
+              {progress ? (
+                <p className="mt-1 text-[11px]">{progress}</p>
+              ) : null}
+            </>
+          ) : null}
+          {unavailableState === "not_evaluated" ? (
+            <p className="mt-1 text-[11px]">
+              A model has been trained, but a version with no evaluation report
+              cannot be deployed. Module 09 grades it; Module 17 fields it.
+            </p>
+          ) : null}
+          {unavailableState === "not_deployed" ? (
+            <p className="mt-1 text-[11px]">
+              A trained and evaluated model exists, but nobody has put it in
+              service. Deployment is a deliberate act in Module 17, and until it
+              happens this card has no figure to show.
+            </p>
+          ) : null}
           <p className="mt-1 text-[11px]">
             The recommendation below does not depend on this: the rule can be applied
             from the recorded state and the mass balance alone. Nothing is being

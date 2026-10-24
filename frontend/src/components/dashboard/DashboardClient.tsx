@@ -24,7 +24,11 @@ import { readPredictionExplanation } from "@/lib/explanationApi";
 import type { LocalExplanation } from "@/lib/explanation";
 import { listPans } from "@/lib/pansApi";
 import type { SaltPan } from "@/lib/pans";
-import { predictRisk, readRiskModuleStatus } from "@/lib/riskPredictionApi";
+import {
+  predictRisk,
+  readRiskModuleStatus,
+  type RiskModuleStatus,
+} from "@/lib/riskPredictionApi";
 import type { RiskPrediction } from "@/lib/riskPrediction";
 import { sweepRainfallScenarios } from "@/lib/simulationApi";
 import type { RainfallSweep } from "@/lib/simulation";
@@ -163,16 +167,16 @@ export default function DashboardClient() {
   // land, and a boolean would swallow the second.
   const [evidenceToken, setEvidenceToken] = useState(0);
 
-  // Whether a trained model is in service, read once on mount so the ML card can
-  // state an absence without the operator pressing a button to find out. `null`
-  // means the read did not answer, and the card then falls back to asking rather
-  // than asserting anything.
-  const [modelTrained, setModelTrained] = useState<boolean | null>(null);
+  // What the backend reports about the model, read once on mount so the ML card
+  // can state an absence — and which step is missing from it — without the
+  // operator pressing a button to find out. `null` means the read did not answer,
+  // and the card then falls back to asking rather than asserting anything.
+  const [modelStatus, setModelStatus] = useState<RiskModuleStatus | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     void readRiskModuleStatus().then((status) => {
-      if (!cancelled) setModelTrained(status?.trained ?? null);
+      if (!cancelled) setModelStatus(status);
     });
     return () => {
       cancelled = true;
@@ -564,7 +568,7 @@ export default function DashboardClient() {
                 loading={risk.loading}
                 onPredict={runPrediction}
                 hasRun={risk.hasRun}
-                modelTrained={modelTrained}
+                modelStatus={modelStatus}
               />
             </div>
           </div>

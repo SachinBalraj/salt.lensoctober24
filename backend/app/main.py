@@ -139,6 +139,12 @@ async def database_health():
     return dict(await db.check_health())
 
 
+@app.get("/health", tags=["meta"])
+def health_simple():
+    """Simple application health check."""
+    return {"status": "ok"}
+
+
 @app.get("/api/modules", tags=["meta"])
 def modules():
     return {
@@ -150,3 +156,11 @@ def modules():
 
 for router in all_routers:
     app.include_router(router)
+
+# Register Open-Meteo provider
+try:
+    from app.services.open_meteo_registration import register_open_meteo
+    register_open_meteo()
+except Exception:
+    pass
+

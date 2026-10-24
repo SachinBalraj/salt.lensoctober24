@@ -1,3 +1,7 @@
+import {
+  validateFarmerName,
+  validateWhatsAppNumber,
+} from "@/lib/pans";
 import { describe, expect, it } from "vitest";
 import {
   EMPTY_PAN_FORM,
@@ -12,6 +16,8 @@ import {
   validatePositiveMeasurement,
   validateRegistration,
   validateRequiredText,
+  validateRiskThreshold,
+  validateRiskThresholds,
   validateUpdate,
   type SaltPan,
   type SaltPanFormValues,
@@ -243,6 +249,19 @@ describe("validateRegistration", () => {
       area_m2: 12500,
       normal_depth_cm: 15.5,
       target_harvest_salinity_g_l: 285,
+      // The whole operator-limits block is submitted, unset fields as null, so the
+      // absence of a limit is explicit rather than implied by omission.
+      risk_thresholds: {
+        flood_depth_cm: null,
+        dilution_salinity_g_l: null,
+        critical_rainfall_24h_mm: null,
+        target_flow_cm: null,
+        max_observation_age_hours: null,
+      },
+      // Sent explicitly as null rather than omitted: a registration that records no
+      // farmer should say so, rather than leaving the field's absence to be read.
+      farmer_name: null,
+      farmer_whatsapp: null,
     });
   });
 
@@ -285,6 +304,13 @@ describe("validateUpdate", () => {
       area_m2: 12500,
       normal_depth_cm: 15.5,
       target_harvest_salinity_g_l: 285,
+      risk_thresholds: {
+        flood_depth_cm: null,
+        dilution_salinity_g_l: null,
+        critical_rainfall_24h_mm: null,
+        target_flow_cm: null,
+        max_observation_age_hours: null,
+      },
     });
   });
 
@@ -311,6 +337,126 @@ describe("validateUpdate", () => {
   });
 });
 
+describe("divergent rules and the operator's risk thresholds", () => {
+  // A decision rule reads these values from the pan's own configuration and is
+  // refused, not defaulted, when one is missing. These tests pin the frontend half:
+  // the fields exist, blank is "not configured" rather than zero, and the whole
+  // block reaches the payload so the operator can set (and clear) each limit.
+
+  it("treats every blank threshold as not configured, not as zero", () => {
+    expect(validateRiskThreshold("", { label: "Flood depth", unit: "cm", allowZero: true })).toEqual(
+      { value: null, error: null },
+    );
+  });
+
+  it("verifies the exact three limits the harvest/flood rule refuses without", () => {
+    // The rule's criteria name these three bounds plus the harvest target, so a pan
+    // that is complete but unconfigured reaches `insufficient_evidence` naming them.
+    const { payload, errors } = validateRegistration(
+      formValues({
+        flood_depth_cm: "25",
+        dilution_salinity_g_l: "180",
+        target_flow_cm: "12",
+      }),
+    );
+    expect(errors).toEqual({});
+    expect(payload?.risk_thresholds).toEqual({
+      flood_depth_cm: 25,
+      dilution_salinity_g_l: 180,
+      critical_rainfall_24h_mm: null,
+      target_flow_cm: 12,
+      max_observation_age_hours: null,
+    });
+  });
+
+  it("accepts zero for the depth, salinity and rainfall limits", () => {
+    for (const field of [
+      "flood_depth_cm",
+      "dilution_salinity_g_l",
+      "critical_rainfall_24h_mm",
+    ] as const) {
+      const { payload, errors } = validateRegistration(formValues({ [field]: "0" }));
+      expect(errors[field]).toBeUndefined();
+      expect(payload?.risk_thresholds?.[field]).toBe(0);
+    }
+  });
+
+  it("refuses zero or negative transfer depth and reading age", () => {
+    const zeroFlow = validateRegistration(formValues({ target_flow_cm: "0" }));
+    expect(zeroFlow.payload).toBeNull();
+    expect(zeroFlow.errors.target_flow_cm).toBe(
+      "Target transfer depth must be greater than 0 cm.",
+    );
+
+    const negativeAge = validateRegistration(
+      formValues({ max_observation_age_hours: "-1" }),
+    );
+    expect(negativeAge.payload).toBeNull();
+    expect(negativeAge.errors.max_observation_age_hours).toBe(
+      "Maximum reading age must be greater than 0 h.",
+    );
+  });
+
+  it("refuses a negative depth, salinity or rainfall limit", () => {
+    for (const [field, label] of [
+      ["flood_depth_cm", "Flood depth"],
+      ["dilution_salinity_g_l", "Dilution salinity"],
+      ["critical_rainfall_24h_mm", "Critical rainfall (24 h)"],
+    ] as const) {
+      const { payload, errors } = validateRegistration(formValues({ [field]: "-5" }));
+      expect(payload).toBeNull();
+      expect(errors[field]).toBe(`${label} must be 0 or greater.`);
+    }
+  });
+
+  it("reports a non-numeric threshold rather than coercing it", () => {
+    const { payload, errors } = validateRegistration(
+      formValues({ dilution_salinity_g_l: "salty" }),
+    );
+    expect(payload).toBeNull();
+    expect(errors.dilution_salinity_g_l).toBe("Dilution salinity must be a number.");
+  });
+
+  it("returns all five keys so a limit can be cleared on update", () => {
+    const { value, errors } = validateRiskThresholds(
+      formValues({ flood_depth_cm: "25" }),
+    );
+    expect(errors).toEqual({});
+    // Every key is present, and the configured one is a number while the rest are
+    // null. That is what lets the backend replace the block whole and express
+    // "I removed my flood depth".
+    expect(value).toEqual({
+      flood_depth_cm: 25,
+      dilution_salinity_g_l: null,
+      critical_rainfall_24h_mm: null,
+      target_flow_cm: null,
+      max_observation_age_hours: null,
+    });
+  });
+
+  it("sends the threshold block on update so the pre-filled form round-trips", () => {
+    const { payload, errors } = validateUpdate(
+      formValues({ flood_depth_cm: "25", target_flow_cm: "12" }),
+    );
+    expect(errors).toEqual({});
+    expect(payload?.risk_thresholds).toEqual({
+      flood_depth_cm: 25,
+      dilution_salinity_g_l: null,
+      critical_rainfall_24h_mm: null,
+      target_flow_cm: 12,
+      max_observation_age_hours: null,
+    });
+  });
+
+  it("rejects an update that carries an invalid threshold", () => {
+    const { payload, errors } = validateUpdate(formValues({ target_flow_cm: "0" }));
+    expect(payload).toBeNull();
+    expect(errors.target_flow_cm).toBe(
+      "Target transfer depth must be greater than 0 cm.",
+    );
+  });
+});
+
 describe("panToFormValues", () => {
   const pan: SaltPan = {
     id: "65f0000000000000000000a1",
@@ -326,6 +472,8 @@ describe("panToFormValues", () => {
     created_at: "2026-01-05T08:00:00Z",
     updated_at: "2026-01-05T08:00:00Z",
     deactivated_at: null,
+  farmer_name: null,
+  farmer_whatsapp_masked: null,
   latest_observation: null,
   };
 
@@ -341,6 +489,36 @@ describe("panToFormValues", () => {
     const values = panToFormValues({ ...pan, latitude: null, longitude: null });
     expect(values.latitude).toBe("");
     expect(values.longitude).toBe("");
+    expect(validateUpdate(values).errors).toEqual({});
+  });
+
+  it("seeds the operator limits, showing an unconfigured one as blank", () => {
+    const values = panToFormValues({
+      ...pan,
+      risk_thresholds: {
+        flood_depth_cm: 25,
+        dilution_salinity_g_l: null,
+        critical_rainfall_24h_mm: 50,
+        target_flow_cm: 12,
+        max_observation_age_hours: null,
+      },
+    });
+    expect(values.flood_depth_cm).toBe("25");
+    expect(values.critical_rainfall_24h_mm).toBe("50");
+    expect(values.target_flow_cm).toBe("12");
+    // Nothing configured is a blank box, so the operator can see what is set and
+    // what a rule would still be refused for.
+    expect(values.dilution_salinity_g_l).toBe("");
+    expect(values.max_observation_age_hours).toBe("");
+    expect(validateUpdate(values).errors).toEqual({});
+  });
+
+  it("tolerates a pan returned without a threshold block", () => {
+    // Older responses, or a fixture that predates the block, must read as nothing
+    // configured rather than crashing the edit form.
+    const values = panToFormValues({ ...pan, risk_thresholds: undefined });
+    expect(values.flood_depth_cm).toBe("");
+    expect(values.target_flow_cm).toBe("");
     expect(validateUpdate(values).errors).toEqual({});
   });
 });
@@ -380,7 +558,126 @@ describe("display formatting", () => {
       created_at: "2026-01-01T00:00:00Z",
       updated_at: "2026-01-01T00:00:00Z",
       deactivated_at: null,
+  farmer_name: null,
+  farmer_whatsapp_masked: null,
   latest_observation: null,
     })).toBeCloseTo(100);
+  });
+});
+
+describe("farmer contact", () => {
+  it("registers a pan with a farmer and a number", () => {
+    const { payload, errors } = validateRegistration(
+      formValues({
+        latitude: "-30.7444",
+        longitude: "30.8071",
+        farmer_name: "  Ravi Patel  ",
+        farmer_whatsapp: "+919876543210",
+      }),
+    );
+
+    expect(errors).toEqual({});
+    // The name is trimmed and the number submitted in its normalised form, so the
+    // value stored is the value the send will dialled.
+    expect(payload).toMatchObject({
+      farmer_name: "Ravi Patel",
+      farmer_whatsapp: "+919876543210",
+    });
+  });
+
+  it("treats a pan with no farmer as a complete registration", () => {
+    const { payload, errors } = validateRegistration(
+      formValues({ latitude: "-30.7444", longitude: "30.8071" }),
+    );
+
+    expect(errors).toEqual({});
+    expect(payload).not.toBeNull();
+  });
+
+  it.each([
+    ["09876543210", /Start with \+/],
+    ["+9876", /8 to 15 digits/],
+    ["+1234567890123456", /8 to 15 digits/],
+    ["+91 98765 abc", /digits only/],
+  ])("rejects %s", (number, expected) => {
+    const { payload, errors } = validateRegistration(
+      formValues({ farmer_whatsapp: number }),
+    );
+
+    expect(payload).toBeNull();
+    expect(errors.farmer_whatsapp).toMatch(expected);
+  });
+
+  it.each([
+    ["+919876543210", "+919876543210"],
+    ["+91 98765-43210", "+919876543210"],
+    ["+91 (987) 654.3210", "+919876543210"],
+  ])("normalises %s", (typed, expected) => {
+    // Separators are how numbers are read aloud and written down. Refusing them would
+    // train an operator to work around the form rather than fix the number.
+    expect(validateWhatsAppNumber(typed)).toEqual({ value: expected, error: null });
+  });
+
+  it("keeps the name optional but bounded", () => {
+    expect(validateFarmerName("  ")).toEqual({ value: null, error: null });
+    expect(validateFarmerName("a".repeat(121)).error).toContain("120 characters or fewer");
+  });
+
+  it("sends nothing on update when the number field is left blank", () => {
+    // The read API never returns the number, so the field is always blank on the edit
+    // form. Omitting the key is the only way to say "leave it as it is" — sending
+    // null would clear a contact the operator never saw.
+    const { payload } = validateUpdate(formValues(), { panHasFarmerName: true });
+
+    expect(payload).not.toHaveProperty("farmer_whatsapp");
+  });
+
+  it("replaces the number on update when one is typed", () => {
+    const { payload, errors } = validateUpdate(
+      formValues({ farmer_whatsapp: "+91 98765-43210" }),
+      { panHasFarmerName: true },
+    );
+
+    expect(errors).toEqual({});
+    expect(payload).toMatchObject({ farmer_whatsapp: "+919876543210" });
+  });
+
+  it("clears the name on update only when one was recorded", () => {
+    // Clearing a name has to be an explicit act; an untouched blank field must not
+    // wipe a name the operator cannot see on a pan they opened to change something else.
+    expect(validateUpdate(formValues(), { panHasFarmerName: true }).payload).toMatchObject({
+      farmer_name: null,
+    });
+    expect(validateUpdate(formValues(), { panHasFarmerName: false }).payload).not.toHaveProperty(
+      "farmer_name",
+    );
+  });
+
+  it("round-trips the name through the form but never the number", () => {
+    const stored: SaltPan = {
+      id: "65f0000000000000000000a1",
+      pan_id: "pans-2026-a01",
+      pan_name: "Northern pan",
+      location: "Port Shepstone",
+      latitude: -30.7444,
+      longitude: 30.8071,
+      area_m2: 12500,
+      normal_depth_cm: 15.5,
+      target_harvest_salinity_g_l: 285,
+      is_active: true,
+      created_at: "2026-03-01T00:00:00Z",
+      updated_at: "2026-03-01T00:00:00Z",
+      deactivated_at: null,
+      latest_observation: null,
+      farmer_name: "Ravi Patel",
+      farmer_whatsapp_masked: "+919•••••••10",
+    };
+
+    const values = panToFormValues(stored);
+
+    expect(values.farmer_name).toBe("Ravi Patel");
+    // Only the mask ever left the server, so the form cannot show the number even if
+    // it wanted to.
+    expect(values.farmer_whatsapp).toBe("");
   });
 });

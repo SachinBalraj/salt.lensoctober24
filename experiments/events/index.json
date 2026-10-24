@@ -1,0 +1,36 @@
+{
+  "event_count": 1,
+  "events": [
+    {
+      "category": "INCOMPLETE_EVIDENCE_EVENT",
+      "date": "2026-03-14",
+      "event_id": "ev-249b575de8234ff09b341e525ef5d4a1",
+      "has_observation": true,
+      "pan_id": "pan_orginal",
+      "prediction_locked": true
+    }
+  ],
+  "schema": "saltlens.experiment-registry.index/1",
+  "write_log": [
+    {
+      "action": "registered",
+      "at": "2026-10-05T15:44:29.117832+00:00",
+      "event_id": "ev-249b575de8234ff09b341e525ef5d4a1"
+    },
+    {
+      "action": "prediction_locked",
+      "at": "2026-10-05T15:44:29.119213+00:00",
+      "event_id": "ev-249b575de8234ff09b341e525ef5d4a1"
+    },
+    {
+      "action": "intervention_recorded",
+      "at": "2026-10-05T15:44:29.119825+00:00",
+      "event_id": "ev-249b575de8234ff09b341e525ef5d4a1"
+    },
+    {
+      "action": "observation_recorded",
+      "at": "2026-10-05T15:44:29.120419+00:00",
+      "event_id": "ev-249b575de8234ff09b341e525ef5d4a1"
+    }
+  ]
+}

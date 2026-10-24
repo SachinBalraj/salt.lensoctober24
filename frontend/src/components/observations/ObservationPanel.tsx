@@ -40,9 +40,15 @@ function asApiError(caught: unknown, fallback: string): ApiError {
 export default function ObservationPanel({
   pan,
   isDemo = false,
+  onEvidenceRecorded,
 }: {
   pan: SaltPan;
   isDemo?: boolean;
+  /**
+   * Called after a reading is stored, so the digital twin below can re-read the
+   * join against it. The twin is a view over this record, not a copy of it.
+   */
+  onEvidenceRecorded?: () => void;
 }) {
   const [reloadToken, setReloadToken] = useState(0);
   const [history, setHistory] = useState<HistoryState | null>(null);
@@ -95,6 +101,7 @@ export default function ObservationPanel({
    */
   async function handleRecorded() {
     setReloadToken((token) => token + 1);
+    onEvidenceRecorded?.();
     if (isDemo) return;
     try {
       const refreshed = await getPan(pan.pan_id);

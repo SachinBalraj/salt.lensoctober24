@@ -76,7 +76,13 @@ export default function EditPanClient({ panId }: { panId: string }) {
   }
 
   async function handleSubmit() {
-    const { payload, errors: validationErrors } = validateUpdate(values);
+    // `panHasFarmerName` is passed because the name is not sensitive and does
+    // round-trip through the form, so clearing it has to be an explicit empty
+    // string rather than an omission. The number is never returned and is handled
+    // the other way round: omitted unless typed.
+    const { payload, errors: validationErrors } = validateUpdate(values, {
+      panHasFarmerName: (pan?.farmer_name ?? "") !== "",
+    });
     if (!payload) {
       setErrors(validationErrors);
       return;
@@ -216,6 +222,7 @@ export default function EditPanClient({ panId }: { panId: string }) {
             panIdLocked
             submitLabel="Save changes"
             idPrefix="edit"
+            recordedFarmerNumber={pan.farmer_whatsapp_masked}
           />
         </div>
       </Card>

@@ -240,6 +240,10 @@ export function buildSimulationRequest(
     errors.initial_salinity_g_l =
       "Salinity cannot be negative. A negative concentration has no physical meaning.";
   }
+  if (salinity !== null && salinity === 0) {
+    errors.initial_salinity_g_l =
+      "Enter a salinity greater than zero. There is no brine to dilute in a pan holding fresh water.";
+  }
   if (salinity !== null && salinity > INPUT_RANGES.initial_salinity_g_l.max) {
     errors.initial_salinity_g_l = `Salinity above ${INPUT_RANGES.initial_salinity_g_l.max} g/L is a typed digit, not brine. Check the units are g/L.`;
   }

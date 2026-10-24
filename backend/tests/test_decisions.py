@@ -1356,6 +1356,128 @@ def test_records_plus_a_refreshed_snapshot_resolve_the_dashboard_workflow(
     assert simulation["rainfall_source"] == "twin.forecast_rainfall_mm"
 
 
+def test_a_current_observation_and_forecast_reach_a_recommendation_via_refresh(
+    client: TestClient, database: FakeDatabase
+) -> None:
+    """The exact gap the pan detail page hit: records exist, the twin assembles,
+    yet advising refuses until a snapshot is stored.
+
+    Everything here is written through the real HTTP endpoints — a pan is
+    registered, a manual observation (300 g/L, 20 cm) and a weather forecast (0.9
+    mm at 53%) are recorded — so the twin Module 05 assembles and displays is
+    genuinely complete and is drawn from live records, not from a fixture.
+
+    The refusal that opens the test is the bug: `GET /api/twin/{id}/state` reads
+    the twin without storing it, so a pan whose state is plainly complete still
+    answers `no_twin_state` when Module 12 asks. The step that closes the gap is
+    `POST /api/twin/{id}/refresh`; only then does the history report a persisted
+    state and the recommendation resolve. Nothing is marked demonstration: this
+    is a real pan, a real reading and a real forecast.
+    """
+    pan_id = "kzn-current-observation"
+    area_m2 = 12_300.0
+
+    # Register the pan and record a current observation plus a forecast in force,
+    # all through the HTTP API so nothing is stubbed into existence.
+    registered = client.post(
+        "/api/pans/",
+        json={
+            "pan_id": pan_id,
+            "pan_name": "Current observation pan",
+            "location": "Marakkanam",
+            "area_m2": area_m2,
+            "normal_depth_cm": 20.0,
+            "target_harvest_salinity_g_l": 285.0,
+            "risk_thresholds": {
+                "flood_depth_cm": 45.0,
+                "dilution_salinity_g_l": 250.0,
+                "critical_rainfall_24h_mm": 80.0,
+                "target_flow_cm": 1.5,
+            },
+        },
+    )
+    assert registered.status_code == 201, registered.text
+
+    observed = client.post(
+        "/api/observations/",
+        json={
+            "pan_id": pan_id,
+            "salinity_g_l": 300.0,
+            "water_depth_cm": 20.0,
+            "brine_temperature_c": 30.0,
+            "data_source": "manual",
+        },
+    )
+    assert observed.status_code in (200, 201), observed.text
+
+    # A forecast is written by supplying `forecast_for`; the schema marks the row
+    # as a forecast and refuses an explicit flag alongside it.
+    forecast_issued = datetime(2026, 10, 15, 2, 0, tzinfo=timezone.utc)
+    forecast_applies = datetime(2026, 10, 15, 14, 0, tzinfo=timezone.utc)
+    forecast = client.post(
+        "/api/weather/",
+        json={
+            "pan_id": pan_id,
+            "timestamp": forecast_issued.isoformat(),
+            "forecast_for": forecast_applies.isoformat(),
+            "rainfall_mm": 0.9,
+            "rainfall_probability_percent": 53.0,
+            "source": "manual",
+        },
+    )
+    assert forecast.status_code in (200, 201), forecast.text
+    assert forecast.json()["is_forecast"] is True
+
+    # The twin is complete only when all three records exist, so an observed
+    # weather reading sits beside the forecast rather than being folded into it.
+    observed_weather = client.post(
+        "/api/weather/",
+        json={
+            "pan_id": pan_id,
+            "rainfall_mm": 0.0,
+            "ambient_temperature_c": 30.0,
+            "humidity_percent": 65.0,
+            "source": "manual",
+        },
+    )
+    assert observed_weather.status_code in (200, 201), observed_weather.text
+    assert observed_weather.json()["is_forecast"] is False
+
+    # The twin assembles completely from those two records and shows so on Module
+    # 05 — yet advising refuses, because nothing has been stored.
+    state = client.get(f"/api/twin/{pan_id}/state")
+    assert state.status_code == 200, state.text
+    assert state.json()["is_complete"] is True
+    assert state.json()["forecast_rainfall_mm"] == pytest.approx(0.9, rel=1e-9)
+
+    write_rule(client)
+    refused = advise(client, pan_id)
+    assert refused.status_code == 409, refused.text
+    assert refused.json()["code"] == "no_twin_state"
+    assert stored_recommendations(database) == []
+
+    # The one step that finishes the workflow: store the twin that is on screen.
+    refreshed = client.post(f"/api/twin/{pan_id}/refresh")
+    assert refreshed.status_code in (200, 201), refreshed.text
+    assert refreshed.json()["stored"] is True
+
+    # GET/read now reports a persisted state rather than only a live assembly.
+    history = client.get(f"/api/twin/{pan_id}/history")
+    assert history.status_code == 200, history.text
+    assert history.json()["total"] >= 1
+
+    # And the same pan now answers with a recommendation, not no_twin_state.
+    advised = advise(client, pan_id)
+    assert advised.status_code == 200, advised.text
+    body = advised.json()
+    assert body["recommendation"] in {a["action"] for a in RULE_ACTIONS}
+    assert body["pan_id"] == pan_id
+    assert body["simulation_result"]["initial_salinity_g_l"] == pytest.approx(
+        300.0, rel=1e-12
+    )
+    assert body["simulation_result"]["rainfall_mm"] == pytest.approx(0.9, rel=1e-9)
+
+
 def test_a_twin_the_physics_cannot_run_is_refused(
     client: TestClient, database: FakeDatabase
 ) -> None:

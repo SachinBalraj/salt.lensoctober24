@@ -238,6 +238,26 @@ def test_module_publishes_no_default_labels(client: TestClient) -> None:
     assert body["prediction_gate"]["with_nothing_deployed"].startswith("409")
 
 
+def test_the_status_reports_the_registry_it_has(client: TestClient) -> None:
+    """``trained`` and ``model_state`` are read, not written.
+
+    With an empty registry the honest answer is "no model", which is also what a
+    constant used to say — the difference is that this one changes when a model
+    is registered, evaluated or deployed, and a constant could not.
+    """
+    body = client.get("/api/risk/").json()
+    assert body["trained"] is False
+    assert body["model_state"] == "no_model"
+    # The sufficiency gate, with its own thresholds, so a client can state what
+    # is actually required instead of hardcoding a number that would drift from
+    # the code that enforces it.
+    gate = body["training_gate"]
+    assert gate["ready"] is False
+    assert gate["genuine_labelled_rows"] == 0
+    assert gate["min_total_labelled_rows"] == 80
+    assert gate["min_distinct_pans"] == 3
+
+
 def test_predict_needs_a_configured_database_before_anything_else(client: TestClient) -> None:
     """The 503 comes first, and that ordering is deliberate.
 

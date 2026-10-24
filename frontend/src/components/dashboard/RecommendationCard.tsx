@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/Primitives";
 import { ProvenanceCard, ProvenanceTag } from "@/components/dashboard/Provenance";
 import { CriteriaTable } from "@/components/decisions/CriteriaTable";
 import { OperatorDecisionPanel } from "@/components/dashboard/DecisionPanel";
+import { WhatsAppSendPanel } from "@/components/dashboard/WhatsAppSendPanel";
 import { ApiError } from "@/lib/api";
 import { adviceCanRetry, adviceUnavailableMessage } from "@/lib/decisionsApi";
 import { ADVICE_REFUSAL_REMEDIES } from "@/lib/decisionsRefusals";
@@ -87,11 +88,22 @@ export function RecommendationCard({
       </ProvenanceCard>
 
       {advice ? (
-        <OperatorDecisionPanel
-          advice={advice}
-          decision={decision}
-          onRecord={onRecord}
-        />
+        <>
+          {/* Contact sits above the decision, not below it. Telling the farmer what
+              to do is a communication the operator may want either side of deciding
+              whether to accept the advice, and neither button touches the other's
+              record. */}
+          {/* Keyed so a new recommendation remounts the panel: the message, the
+              recipient and the recorded sends all belong to one recommendation, and
+              carrying any of them across to another would put a farmer's number
+              beside the wrong advice. */}
+          <WhatsAppSendPanel key={advice.recommendation_id} advice={advice} />
+          <OperatorDecisionPanel
+            advice={advice}
+            decision={decision}
+            onRecord={onRecord}
+          />
+        </>
       ) : null}
     </>
   );
